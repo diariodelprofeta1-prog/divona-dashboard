@@ -1,0 +1,29 @@
+name: Actualizar Dashboard Divona
+on:
+  schedule:
+    - cron: '0 * * * *' # Se ejecuta cada hora automáticamente
+  workflow_dispatch: # Permite ejecutarlo a mano cuando quieras
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v2
+      - name: Configurar Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+      - name: Instalar librerías
+        run: pip install -r requirements.txt
+      - name: Ejecutar motor Divona
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          DATABASE_ID: ${{ secrets.DATABASE_ID }}
+        run: python calendario_divona.py
+      - name: Publicar Web
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
+          publish_files: index.html
