@@ -28,57 +28,65 @@ def get_safe_text(prop):
         if t == "title": return prop["title"][0]["plain_text"] if prop["title"] else "Reserva"
         if t in ["select", "status"]: return prop[t]["name"] if prop[t] else ""
         if t == "rich_text": return prop["rich_text"][0]["plain_text"] if prop["rich_text"] else ""
-        if t == "phone_number": return prop["phone_number"] or ""
         return ""
     except: return ""
 
 def generar_dashboard():
     res = requests.post(f"https://api.notion.com/v1/databases/{DATABASE_ID}/query", headers=headers)
     ocupacion = {} 
+    limpiezas_previas = {} # Para detectar el día antes de la reserva
+
     for r in res.json().get("results", []):
         p = r["properties"]
         f_data = p.get("Fecha", {}).get("date", {})
         if not f_data: continue
-        start = datetime.strptime(f_data.get("start")[:10], "%Y-%m-%d")
-        end = datetime.strptime((f_data.get("end") or f_data.get("start"))[:10], "%Y-%m-%d")
         
-        # --- PASO 1: SOLO LEER LAS NUEVAS FECHAS ---
-        # Si la columna tiene fecha, pondremos 'OK', si no 'Pendiente'
-        limp = "OK" if p.get("Limpieza", {}).get("date") else "Pendiente"
-        c_in = "OK" if p.get("Check-in", {}).get("date") else "Pendiente"
-        c_out = "OK" if p.get("Check-out", {}).get("date") else "Pendiente"
-
+        start_dt = datetime.strptime(f_data.get("start")[:10], "%Y-%m-%d")
+        end_dt = datetime.strptime((f_data.get("end") or f_data.get("start"))[:10], "%Y-%m-%d")
+        
         info = {
+            "id": r["id"],
             "nombre": get_safe_text(p.get("Nombre")), 
+            "inicio": start_dt.date(), 
+            "fin": end_dt.date(), 
             "estado": get_safe_text(p.get("Estado")),
-            "limp": limp, "in": c_in, "out": c_out
+            "limp_ok": p.get("Limpieza", {}).get("date") is not None,
+            "in_ok": p.get("Check-in", {}).get("date") is not None,
+            "out_ok": p.get("Check-out", {}).get("date") is not None
         }
         
-        curr = start
-        while curr <= end:
+        curr = start_dt
+        while curr <= end_dt:
             ocupacion[curr.date()] = info
             curr += timedelta(days=1)
+        
+        # Guardamos el día antes para el botón de limpieza
+        limpiezas_previas[(start_dt - timedelta(days=1)).date()] = info
 
-    html = """
+    html = f"""
     <!DOCTYPE html>
     <html lang="es">
     <head>
         <meta charset="UTF-8">
+        <title>SAILBOAT CHARTER MALLORCA</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=Cinzel:wght@700&display=swap" rel="stylesheet">
         <style>
-            body { background-color: #0f172a; font-family: 'Inter', sans-serif; color: #f1f5f9; }
-            h1 { font-family: 'Cinzel', serif; letter-spacing: 2px; }
-            .month-card { background: #1e293b; border: 1px solid #334155; border-radius: 1.5rem; overflow: hidden; }
-            .grid-cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
-            .day { aspect-ratio: 1/1; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; border-radius: 6px; }
-            .occupied { background: #3b82f6; color: white; font-weight: 900; cursor: pointer; }
-            .free { background: rgba(255,255,255,0.03); color: #475569; }
+            body {{ background-color: #0f172a; font-family: 'Inter', sans-serif; color: #f1f5f9; }}
+            h1 {{ font-family: 'Cinzel', serif; letter-spacing: 2px; }}
+            .month-card {{ background: #1e293b; border: 1px solid #334155; border-radius: 1.5rem; overflow: hidden; }}
+            .grid-cal {{ display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }}
+            .day {{ aspect-ratio: 1/1; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 0.7rem; border-radius: 6px; position: relative; }}
+            .occupied {{ background: #3b82f6; color: white; font-weight: 900; }}
+            .free {{ background: rgba(255,255,255,0.03); color: #475569; }}
+            .btn-action {{ font-size: 0.4rem; padding: 2px 0; border-radius: 4px; margin-top: 2px; width: 90%; font-weight: 900; border: none; text-transform: uppercase; cursor: pointer; }}
+            .btn-off {{ background: #f59e0b; color: #451a03; }}
+            .btn-on {{ background: #22c55e; color: white; cursor: default; }}
         </style>
     </head>
     <body class="p-4 md:p-8">
         <div class="max-w-7xl mx-auto">
-            <h1 class="text-3xl font-black text-white mb-12 border-b border-slate-800 pb-8">SAILBOAT CHARTER MALLORCA</h1>
+            <h1 class="text-3xl font-black text-white mb-12 border-b border-slate-800 pb-8 uppercase">Sailboat Charter Mallorca</h1>
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
     """
 
@@ -89,7 +97,7 @@ def generar_dashboard():
         _, t_color, _ = get_day_season(f_mid)
         html += f"""
         <div class="month-card shadow-2xl">
-            <div class="p-4 flex justify-between items-center" style="background: {t_color}15; border-bottom: 2px solid {t_color}">
+            <div class="p-4 border-b border-slate-700 bg-slate-800/50 flex justify-between">
                 <span class="font-black text-xs" style="color: {t_color}">{MESES_NOMBRES[mes].upper()}</span>
             </div>
             <div class="p-4"><div class="grid-cal">"""
@@ -97,15 +105,52 @@ def generar_dashboard():
         for dia in range(1, ultimo + 1):
             f_actual = datetime(2026, mes, dia).date()
             res = ocupacion.get(f_actual)
+            limp = limpiezas_previas.get(f_actual)
+            
             if res:
-                # Ahora el alert muestra si la limpieza/in/out están hechos
-                msg = f"{res['nombre']}\\nEstado: {res['estado']}\\nLimpieza: {res['limp']}\\nCheck-in: {res['in']}\\nCheck-out: {res['out']}"
-                html += f'<div onclick=\'alert("{msg}")\' class="day occupied">{dia}</div>'
+                btn_html = ""
+                # BOTONES DENTRO DE DÍAS OCUPADOS
+                if res['inicio'] == f_actual:
+                    s, l = ("btn-on", "IN OK ✅") if res['in_ok'] else ("btn-off", "⚓ CHECK-IN")
+                    btn_html = f'<button class="{s} btn-action" onclick="event.stopPropagation(); mark(\'{res["id"]}\', \'Check-in\', this)">{l}</button>'
+                elif res['fin'] == f_actual:
+                    s, l = ("btn-on", "OUT OK ✅") if res['out_ok'] else ("btn-off", "🏁 CHECK-OUT")
+                    btn_html = f'<button class="{s} btn-action" onclick="event.stopPropagation(); mark(\'{res["id"]}\', \'Check-out\', this)">{l}</button>'
+                
+                html += f'<div onclick=\'alert("{res["nombre"]} - {res["estado"]}")\' class="day occupied"><span>{dia}</span>{btn_html}</div>'
+            elif limp:
+                # BOTÓN LIMPIEZA EL DÍA ANTES
+                s, l = ("btn-on", "LIMP OK ✅") if limp['limp_ok'] else ("btn-off", "🧹 LIMP")
+                btn_l = f'<button class="{s} btn-action" onclick="mark(\'{limp["id"]}\', \'Limpieza\', this)">{l}</button>'
+                html += f'<div class="day free"><span>{dia}</span>{btn_l}</div>'
             else:
                 html += f'<div class="day free">{dia}</div>'
         html += "</div></div></div>"
 
-    html += "</div></div></body></html>"
+    html += f"""
+            </div>
+        </div>
+        <script>
+            async function mark(id, prop, btn) {{
+                if (btn.classList.contains('btn-on')) return;
+                const today = new Date().toISOString().split('T')[0];
+                btn.innerText = "...";
+                try {{
+                    const r = await fetch(`https://api.notion.com/v1/pages/${{id}}`, {{
+                        method: 'PATCH',
+                        headers: {{ 'Authorization': 'Bearer {TOKEN}', 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{ properties: {{ [prop]: {{ date: {{ start: today }} }} }} }})
+                    }});
+                    if (r.ok) {{
+                        btn.innerText = (prop === "Limpieza" ? "LIMP" : prop.toUpperCase()) + " OK ✅";
+                        btn.className = "btn-action btn-on";
+                    }}
+                }} catch(e) {{ alert("Error de red"); btn.innerText = "Error"; }}
+            }}
+        </script>
+    </body>
+    </html>
+    """
     with open("index.html", "w", encoding="utf-8") as f: f.write(html)
 
 if __name__ == "__main__": generar_dashboard()
