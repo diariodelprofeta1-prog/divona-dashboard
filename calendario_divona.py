@@ -29,7 +29,6 @@ def get_safe_text(prop):
         if t == "title": return prop["title"][0]["plain_text"] if prop["title"] else "Reserva"
         if t == "rich_text": return prop["rich_text"][0]["plain_text"] if prop["rich_text"] else "Reserva"
         if t in ["select", "status"]: return prop[t]["name"] if prop[t] else ""
-        # Añadido para soportar la columna "Cliente" si es tipo persona
         if t == "people": return prop["people"][0]["name"] if prop["people"] else "Sin Nombre"
         return "Reserva"
     except: return "Reserva"
@@ -42,6 +41,13 @@ def get_safe_num(prop):
         if t == "formula": return prop.get("formula", {}).get("number", 0) or 0
         return 0
     except: return 0
+
+def get_safe_email(prop):
+    if not prop: return ""
+    try:
+        if prop.get("type") == "email": return prop.get("email") or ""
+        return ""
+    except: return ""
 
 def generar_dashboard():
     try:
@@ -61,42 +67,38 @@ def generar_dashboard():
         start = datetime.strptime(f_data.get("start")[:10], "%Y-%m-%d").date()
         end = datetime.strptime((f_data.get("end") or f_data.get("start"))[:10], "%Y-%m-%d").date()
         
-        # AHORA BUSCA EXACTAMENTE "Total cliente"
         monto = get_safe_num(p.get("Total cliente"))
-        
-        # Solo sumamos al mes si la reserva NO está cancelada (opcional, pero buena práctica)
         estado = get_safe_text(p.get("Estado"))
-        if estado != "CANCELADA":
-            ingresos_mes[start.month] += monto
+        if estado != "CANCELADA": ingresos_mes[start.month] += monto
 
-        res_id = r["id"]
+        res_id = r["id"].replace("-", "") # ID limpio para Javascript
         color_idx = sum(ord(c) for c in res_id) % len(COLORES)
         
-        # AHORA BUSCA EXACTAMENTE "Cliente"
         nombre_real = get_safe_text(p.get("Cliente"))
         if nombre_real == "Reserva" or nombre_real == "Sin Nombre": 
-            nombre_real = get_safe_text(p.get("Nombre")) # Por si acaso falla, coge "RESERVA X"
+            nombre_real = get_safe_text(p.get("Nombre"))
             
+        correo = get_safe_email(p.get("Correo electrónico 1"))
         comentarios = get_safe_text(p.get("COMENTARIOS"))
         
         info = {
             "nombre": nombre_real, 
             "color": COLORES[color_idx],
-            "monto": monto,
             "detalle": "Cliente: " + nombre_real + "\\nTotal: " + str(monto) + "€\\nEstado: " + estado + "\\nComentarios: " + comentarios
         }
 
+        # Guardamos las acciones como diccionarios para poder tener el email en cada día específico
         curr = start
         while curr <= end:
             if curr not in agenda: agenda[curr] = {"res": None, "acts": []}
             agenda[curr]["res"] = info
-            if curr == start: agenda[curr]["acts"].append("IN")
-            if curr == end: agenda[curr]["acts"].append("OUT")
+            if curr == start: agenda[curr]["acts"].append({"tipo": "IN", "id": res_id, "email": correo, "nombre": nombre_real})
+            if curr == end: agenda[curr]["acts"].append({"tipo": "OUT", "id": res_id, "email": correo, "nombre": nombre_real})
             curr += timedelta(days=1)
         
         limp = start - timedelta(days=1)
         if limp not in agenda: agenda[limp] = {"res": None, "acts": []}
-        agenda[limp]["acts"].append("LIMP")
+        agenda[limp]["acts"].append({"tipo": "LIMP"})
 
     # HTML
     html = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>DIVONA 2026</title>'
@@ -143,8 +145,24 @@ def generar_dashboard():
             acts = data["acts"]
             
             tag = "NONE"
-            if "LIMP" in acts: tag = "LIMP"
-            if "IN" in acts or "OUT" in acts: tag = "OPS"
+            acts_html = ""
+            
+            # Construimos los iconos de manera inteligente
+            for act in acts:
+                if act["tipo"] == "LIMP":
+                    tag = "LIMP" if tag == "NONE" else tag
+                    acts_html += '<span>🧹</span>'
+                elif act["tipo"] in ["IN", "OUT"]:
+                    tag = "OPS"
+                    icon = "⚓" if act["tipo"] == "IN" else "🏁"
+                    
+                    if act["email"]:
+                        # Si hay email, creamos un botón mágico
+                        btn_id = f'{act["tipo"]}-{act["id"]}'
+                        acts_html += f'<span id="{btn_id}" class="email-btn cursor-pointer hover:scale-150 transition-transform text-lg" onclick="enviarCorreo(event, \'{act["tipo"]}\', \'{act["id"]}\', \'{act["email"]}\', \'{act["nombre"]}\')">{icon}</span>'
+                    else:
+                        # Si no hay email, es un icono normal
+                        acts_html += f'<span>{icon}</span>'
             
             css = "day day-cell"
             style = ""
@@ -156,15 +174,14 @@ def generar_dashboard():
             
             html += '<div class="' + css + '" data-tag="' + tag + '" style="' + style + '" ' + click + '>'
             html += '<span class="font-bold">' + str(dia) + '</span>'
-            html += '<div class="flex gap-0.5">'
-            if "LIMP" in acts: html += '<span>🧹</span>'
-            if "IN" in acts: html += '<span>⚓</span>'
-            if "OUT" in acts: html += '<span>🏁</span>'
-            html += '</div></div>'
+            html += '<div class="flex gap-1 items-center">' + acts_html + '</div></div>'
             
         html += '</div></div></div></div>'
 
-    html += '</div></div><script>'
+    html += '</div></div>'
+    
+    # --- SCRIPTS (Filtros + Lógica de Correos) ---
+    html += '<script>'
     html += 'function filterView(type, btn) { '
     html += '  document.querySelectorAll("button").forEach(b => b.classList.replace("bg-blue-600", "bg-slate-700")); '
     html += '  btn.classList.replace("bg-slate-700", "bg-blue-600"); '
@@ -176,6 +193,39 @@ def generar_dashboard():
     html += '    else day.classList.add("dimmed"); '
     html += '  }); '
     html += '} '
+    
+    # Lógica de Correos Automáticos
+    html += 'function enviarCorreo(event, tipo, id, email, nombre) { '
+    html += '  event.stopPropagation(); ' # Evita que salte el cartel de info del día al hacer clic en el barco
+    html += '  const key = "divona_" + tipo + "_" + id; '
+    html += '  const btn = document.getElementById(tipo + "-" + id); '
+    html += '  if(localStorage.getItem(key)) { '
+    html += '    localStorage.removeItem(key); ' # Desmarcar
+    html += '    btn.classList.remove("opacity-20", "grayscale"); '
+    html += '  } else { '
+    html += '    localStorage.setItem(key, "true"); ' # Marcar
+    html += '    btn.classList.add("opacity-20", "grayscale"); '
+    
+    html += '    let asunto = ""; let cuerpo = ""; '
+    html += '    if(tipo === "IN") { '
+    html += '      asunto = "Bienvenido a Divona Center"; '
+    html += '      cuerpo = "Hola " + nombre + ",\\n\\nQueremos darte una cálida bienvenida y agradecerte de corazón por confiar en nosotros para tu experiencia.\\n\\nEn un futuro muy cercano te enviaremos por aquí un enlace de YouTube con los vídeos de tu aventura.\\n\\n¡Que lo disfrutes muchísimo!\\n\\nEl equipo de Divona Center"; '
+    html += '    } else { '
+    html += '      asunto = "Gracias y hasta pronto - Divona Center"; '
+    html += '      cuerpo = "Hola " + nombre + ",\\n\\nEsperamos que hayas disfrutado al máximo tu experiencia con nosotros y que vuelvas muy pronto.\\n\\nComo agradecimiento por ser un cliente recurrente, si contactas con nosotros a través de este correo para tu próxima reserva, ¡te haremos un regalo especial!\\n\\nGracias nuevamente por elegirnos.\\n\\nEl equipo de Divona Center"; '
+    html += '    } '
+    html += '    window.location.href = "mailto:" + email + "?subject=" + encodeURIComponent(asunto) + "&body=" + encodeURIComponent(cuerpo); '
+    html += '  } '
+    html += '} '
+    
+    # Cargar el estado guardado al abrir la web
+    html += 'document.addEventListener("DOMContentLoaded", function() { '
+    html += '  document.querySelectorAll(".email-btn").forEach(btn => { '
+    html += '    const key = "divona_" + btn.id.replace("-", "_"); '
+    html += '    if(localStorage.getItem(key)) { btn.classList.add("opacity-20", "grayscale"); } '
+    html += '  }); '
+    html += '}); '
+    
     html += '</script></body></html>'
 
     with open("index.html", "w", encoding="utf-8") as f:
