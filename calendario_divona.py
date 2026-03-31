@@ -29,13 +29,14 @@ def get_safe_text(prop):
         if t == "title": return prop["title"][0]["plain_text"] if prop["title"] else "Reserva"
         if t == "rich_text": return prop["rich_text"][0]["plain_text"] if prop["rich_text"] else "Reserva"
         if t in ["select", "status"]: return prop[t]["name"] if prop[t] else ""
+        # Añadido para soportar la columna "Cliente" si es tipo persona
+        if t == "people": return prop["people"][0]["name"] if prop["people"] else "Sin Nombre"
         return "Reserva"
     except: return "Reserva"
 
 def get_safe_num(prop):
     if not prop: return 0
     try:
-        # Intenta obtener el número directamente o desde una fórmula
         t = prop.get("type")
         if t == "number": return prop.get("number", 0) or 0
         if t == "formula": return prop.get("formula", {}).get("number", 0) or 0
@@ -60,18 +61,29 @@ def generar_dashboard():
         start = datetime.strptime(f_data.get("start")[:10], "%Y-%m-%d").date()
         end = datetime.strptime((f_data.get("end") or f_data.get("start"))[:10], "%Y-%m-%d").date()
         
-        # SUMA DE DINERO (Verifica que la columna en Notion se llame 'Precio')
-        monto = get_safe_num(p.get("Precio"))
-        ingresos_mes[start.month] += monto
+        # AHORA BUSCA EXACTAMENTE "Total cliente"
+        monto = get_safe_num(p.get("Total cliente"))
+        
+        # Solo sumamos al mes si la reserva NO está cancelada (opcional, pero buena práctica)
+        estado = get_safe_text(p.get("Estado"))
+        if estado != "CANCELADA":
+            ingresos_mes[start.month] += monto
 
         res_id = r["id"]
         color_idx = sum(ord(c) for c in res_id) % len(COLORES)
         
+        # AHORA BUSCA EXACTAMENTE "Cliente"
+        nombre_real = get_safe_text(p.get("Cliente"))
+        if nombre_real == "Reserva" or nombre_real == "Sin Nombre": 
+            nombre_real = get_safe_text(p.get("Nombre")) # Por si acaso falla, coge "RESERVA X"
+            
+        comentarios = get_safe_text(p.get("COMENTARIOS"))
+        
         info = {
-            "nombre": get_safe_text(p.get("Nombre")), 
+            "nombre": nombre_real, 
             "color": COLORES[color_idx],
             "monto": monto,
-            "detalle": "Cliente: " + get_safe_text(p.get("Nombre")) + "\\nPrecio: " + str(monto) + "€\\nEstado: " + get_safe_text(p.get("Estado"))
+            "detalle": "Cliente: " + nombre_real + "\\nTotal: " + str(monto) + "€\\nEstado: " + estado + "\\nComentarios: " + comentarios
         }
 
         curr = start
@@ -103,7 +115,7 @@ def generar_dashboard():
     html += '<div class="p-8 max-w-7xl mx-auto">'
     html += '<div class="flex flex-col md:flex-row justify-between items-end mb-12 gap-6">'
     html += '<div><h1 class="text-4xl font-black tracking-tighter uppercase">Divona Center</h1>'
-    html += '<p class="text-blue-400 font-bold text-xl mt-2">TOTAL 2026: ' + str(f"{total_anual:,.2f}") + ' €</p></div>'
+    html += '<p class="text-blue-400 font-bold text-xl mt-2">TOTAL 2026: ' + str(f"{total_anual:,.0f}") + ' €</p></div>'
     html += '<div class="flex gap-2">'
     html += '<button onclick="filterView(\'all\', this)" class="bg-blue-600 px-4 py-2 rounded-lg text-xs font-bold uppercase">General</button>'
     html += '<button onclick="filterView(\'LIMP\', this)" class="bg-slate-700 px-4 py-2 rounded-lg text-xs font-bold uppercase">Limpiezas</button>'
@@ -140,7 +152,6 @@ def generar_dashboard():
                 css += " occupied"
                 style = "background-color:" + res['color'] + "15; border-color:" + res['color'] + ";"
             
-            # El alert ahora mostrará el nombre y el precio
             click = 'onclick="alert(\''+ (res['detalle'] if res else 'Día Libre') +'\')"'
             
             html += '<div class="' + css + '" data-tag="' + tag + '" style="' + style + '" ' + click + '>'
