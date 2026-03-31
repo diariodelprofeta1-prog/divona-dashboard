@@ -1,6 +1,6 @@
 name: update_dashboard
 on:
-  workflow_dispatch:  # Esto permite darle al botón "Run workflow"
+  workflow_dispatch:
 
 jobs:
   build:
@@ -17,11 +17,11 @@ jobs:
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           DATABASE_ID: ${{ secrets.DATABASE_ID }}
-        run: python calendario.py  # <--- ASEGÚRATE QUE AQUÍ PONE EL NOMBRE DE TU ARCHIVO .PY
-      - name: Commit and push changes
+        run: python calendario.py
+      - name: Commit and push
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
           git add index.html
-          git commit -m "Update dashboard" || exit 0
+          git commit -m "Update" || exit 0
           git push
