@@ -3,6 +3,7 @@ import json
 import os
 from datetime import datetime, timedelta
 import calendar
+import urllib.parse
 
 # Configuración
 TOKEN = os.environ.get("NOTION_TOKEN")
@@ -71,7 +72,7 @@ def generar_dashboard():
         estado = get_safe_text(p.get("Estado"))
         if estado != "CANCELADA": ingresos_mes[start.month] += monto
 
-        res_id = r["id"].replace("-", "") # ID limpio para Javascript
+        res_id = r["id"].replace("-", "") # ID limpio
         color_idx = sum(ord(c) for c in res_id) % len(COLORES)
         
         nombre_real = get_safe_text(p.get("Cliente"))
@@ -87,7 +88,6 @@ def generar_dashboard():
             "detalle": "Cliente: " + nombre_real + "\\nTotal: " + str(monto) + "€\\nEstado: " + estado + "\\nComentarios: " + comentarios
         }
 
-        # Guardamos las acciones como diccionarios para poder tener el email en cada día específico
         curr = start
         while curr <= end:
             if curr not in agenda: agenda[curr] = {"res": None, "acts": []}
@@ -147,7 +147,6 @@ def generar_dashboard():
             tag = "NONE"
             acts_html = ""
             
-            # Construimos los iconos de manera inteligente
             for act in acts:
                 if act["tipo"] == "LIMP":
                     tag = "LIMP" if tag == "NONE" else tag
@@ -156,12 +155,23 @@ def generar_dashboard():
                     tag = "OPS"
                     icon = "⚓" if act["tipo"] == "IN" else "🏁"
                     
-                    if act["email"]:
-                        # Si hay email, creamos un botón mágico
+                    if act.get("email"):
                         btn_id = f'{act["tipo"]}-{act["id"]}'
-                        acts_html += f'<span id="{btn_id}" class="email-btn cursor-pointer hover:scale-150 transition-transform text-lg" onclick="enviarCorreo(event, \'{act["tipo"]}\', \'{act["id"]}\', \'{act["email"]}\', \'{act["nombre"]}\')">{icon}</span>'
+                        
+                        # Preparamos el correo desde Python para que sea un enlace nativo
+                        if act["tipo"] == "IN":
+                            asunto = "Bienvenido a Divona Center"
+                            cuerpo = f"Hola {act['nombre']},\n\nQueremos darte una cálida bienvenida y agradecerte de corazón por confiar en nosotros para tu experiencia.\n\nEn un futuro muy cercano te enviaremos por aquí un enlace de YouTube con los vídeos de tu aventura.\n\n¡Que lo disfrutes muchísimo!\n\nEl equipo de Divona Center"
+                        else:
+                            asunto = "Gracias y hasta pronto - Divona Center"
+                            cuerpo = f"Hola {act['nombre']},\n\nEsperamos que hayas disfrutado al máximo tu experiencia con nosotros y que vuelvas muy pronto.\n\nComo agradecimiento por ser un cliente recurrente, si contactas con nosotros a través de este correo para tu próxima reserva, ¡te haremos un regalo especial!\n\nGracias nuevamente por elegirnos.\n\nEl equipo de Divona Center"
+                        
+                        # urllib.parse.quote convierte los espacios y saltos de línea para que el correo los entienda
+                        href = f"mailto:{act['email']}?subject={urllib.parse.quote(asunto)}&body={urllib.parse.quote(cuerpo)}"
+                        
+                        # Ahora es una etiqueta <a> real, el navegador nunca la bloquea
+                        acts_html += f'<a href="{href}" id="{btn_id}" class="email-btn cursor-pointer hover:scale-150 transition-transform text-lg inline-block" onclick="toggleCorreo(event, \'{act["tipo"]}\', \'{act["id"]}\')">{icon}</a>'
                     else:
-                        # Si no hay email, es un icono normal
                         acts_html += f'<span>{icon}</span>'
             
             css = "day day-cell"
@@ -180,7 +190,7 @@ def generar_dashboard():
 
     html += '</div></div>'
     
-    # --- SCRIPTS (Filtros + Lógica de Correos) ---
+    # --- SCRIPTS ---
     html += '<script>'
     html += 'function filterView(type, btn) { '
     html += '  document.querySelectorAll("button").forEach(b => b.classList.replace("bg-blue-600", "bg-slate-700")); '
@@ -194,31 +204,23 @@ def generar_dashboard():
     html += '  }); '
     html += '} '
     
-    # Lógica de Correos Automáticos
-    html += 'function enviarCorreo(event, tipo, id, email, nombre) { '
-    html += '  event.stopPropagation(); ' # Evita que salte el cartel de info del día al hacer clic en el barco
+    # Función toggleCorreo ajustada para enlaces nativos
+    html += 'function toggleCorreo(event, tipo, id) { '
+    html += '  event.stopPropagation(); ' # Evita que salte el alert del día
     html += '  const key = "divona_" + tipo + "_" + id; '
     html += '  const btn = document.getElementById(tipo + "-" + id); '
-    html += '  if(localStorage.getItem(key)) { '
-    html += '    localStorage.removeItem(key); ' # Desmarcar
-    html += '    btn.classList.remove("opacity-20", "grayscale"); '
-    html += '  } else { '
-    html += '    localStorage.setItem(key, "true"); ' # Marcar
-    html += '    btn.classList.add("opacity-20", "grayscale"); '
     
-    html += '    let asunto = ""; let cuerpo = ""; '
-    html += '    if(tipo === "IN") { '
-    html += '      asunto = "Bienvenido a Divona Center"; '
-    html += '      cuerpo = "Hola " + nombre + ",\\n\\nQueremos darte una cálida bienvenida y agradecerte de corazón por confiar en nosotros para tu experiencia.\\n\\nEn un futuro muy cercano te enviaremos por aquí un enlace de YouTube con los vídeos de tu aventura.\\n\\n¡Que lo disfrutes muchísimo!\\n\\nEl equipo de Divona Center"; '
-    html += '    } else { '
-    html += '      asunto = "Gracias y hasta pronto - Divona Center"; '
-    html += '      cuerpo = "Hola " + nombre + ",\\n\\nEsperamos que hayas disfrutado al máximo tu experiencia con nosotros y que vuelvas muy pronto.\\n\\nComo agradecimiento por ser un cliente recurrente, si contactas con nosotros a través de este correo para tu próxima reserva, ¡te haremos un regalo especial!\\n\\nGracias nuevamente por elegirnos.\\n\\nEl equipo de Divona Center"; '
-    html += '    } '
-    html += '    window.location.href = "mailto:" + email + "?subject=" + encodeURIComponent(asunto) + "&body=" + encodeURIComponent(cuerpo); '
+    html += '  if(localStorage.getItem(key)) { '
+    html += '    localStorage.removeItem(key); ' # Desmarcamos
+    html += '    btn.classList.remove("opacity-20", "grayscale"); '
+    html += '    event.preventDefault(); ' # IMPORTANTÍSIMO: Detiene el envío del correo porque solo queríamos desmarcarlo
+    html += '  } else { '
+    html += '    localStorage.setItem(key, "true"); ' # Marcamos
+    html += '    btn.classList.add("opacity-20", "grayscale"); '
+    html += '    // Al no poner preventDefault, el navegador abre el mailto: automáticamente de forma nativa'
     html += '  } '
     html += '} '
     
-    # Cargar el estado guardado al abrir la web
     html += 'document.addEventListener("DOMContentLoaded", function() { '
     html += '  document.querySelectorAll(".email-btn").forEach(btn => { '
     html += '    const key = "divona_" + btn.id.replace("-", "_"); '
