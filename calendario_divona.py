@@ -120,13 +120,10 @@ def generar_dashboard():
         
         for dia in range(1, ultimo + 1):
             f_act = datetime(2026, mes, dia).date()
-            data_res = agenda.get(f_act, {"res": None, "acts": []})
-            res = data_res["res"]
-            acts = data_res["acts"]
-            
-            tag = "NONE"
-            if "LIMP" in acts: tag = "LIMP"
-            if "IN" in acts or "OUT" in acts: tag = "OPS"
+            data_d = agenda.get(f_act, {"res": None, "acts": []})
+            res = data_d["res"]
+            acts = data_d["acts"]
+            tag = "LIMP" if "LIMP" in acts else ("OPS" if ("IN" in acts or "OUT" in acts) else "NONE")
             
             css = "day day-cell"
             style = ""
