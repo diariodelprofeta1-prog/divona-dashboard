@@ -1,31 +1,38 @@
 name: Actualizar Dashboard Divona
+
 on:
   schedule:
-    - cron: '0 * * * *' # Se ejecuta cada hora
-  workflow_dispatch: # Permite ejecutarlo a mano
+    - cron: '0 * * * *' # Se ejecuta automáticamente cada hora
+  workflow_dispatch: # Te permite ejecutarlo a mano cuando quieras
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Permiso explícito para publicar la web
+      contents: write # Permiso necesario para que el robot guarde la web
     steps:
       - name: Descargar código
         uses: actions/checkout@v4
+
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
+
       - name: Instalar librerías
         run: pip install requests
+
       - name: Ejecutar motor Divona
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           DATABASE_ID: ${{ secrets.DATABASE_ID }}
         run: python calendario_divona.py
+
       - name: Publicar Web
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./
-          keep_files: true
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          # El '|| echo' es la clave: evita el error si no hay nada nuevo que subir
+          git commit -m "Actualización automática Dashboard" || echo "No hay cambios para actualizar"
+          git push
