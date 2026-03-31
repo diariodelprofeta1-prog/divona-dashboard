@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timedelta
 import calendar
 
-# Variables de entorno
+# Configuración de variables
 TOKEN = os.environ.get("NOTION_TOKEN")
 DATABASE_ID = os.environ.get("DATABASE_ID")
 
@@ -38,7 +38,7 @@ def generar_dashboard():
     ocupacion = {} 
     limpiezas = {} 
     
-    COLORES = ["#60a5fa", "#a78bfa", "#f472b6", "#34d399", "#fbbf24", "#22d3ee", "#fb7185", "#818cf8"]
+    COLORES = ["#3b82f6", "#8b5cf6", "#ec4899", "#10b981", "#f59e0b", "#06b6d4", "#f43f5e", "#6366f1", "#14b8a6", "#f97316"]
 
     for r in res.json().get("results", []):
         p = r["properties"]
@@ -52,43 +52,35 @@ def generar_dashboard():
         color_idx = sum(ord(c) for c in res_id) % len(COLORES)
         color_reserva = COLORES[color_idx]
 
-        info = {
-            "nombre": get_safe_text(p.get("Nombre")), 
-            "color": color_reserva,
-            "es_salida": False
-        }
+        info = {"nombre": get_safe_text(p.get("Nombre")), "color": color_reserva, "es_fin": False}
         
-        # Guardamos los días de la reserva
+        # Llenar ocupación
         curr = start
         while curr <= end:
-            # Marcamos si es el último día (Check-out)
             dia_info = info.copy()
-            if curr == end:
-                dia_info["es_salida"] = True
-            
+            if curr == end: dia_info["es_fin"] = True
             ocupacion[curr] = dia_info
             curr += timedelta(days=1)
         
-        # El día de limpieza es el anterior al inicio
-        dia_limp = start - timedelta(days=1)
-        limpiezas[dia_limp] = True
+        # El día de limpieza es el anterior al inicio de la reserva
+        limpiezas[start - timedelta(days=1)] = True
 
-    # HTML
+    # Generar el HTML
     html = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>DIVONA CONTROL</title>'
     html += '<script src="https://cdn.tailwindcss.com"></script>'
     html += '<style>'
     html += 'body { background-color: #0f172a; font-family: sans-serif; color: #f1f5f9; } '
     html += '.month-card { background: #1e293b; border: 1px solid #334155; border-radius: 1rem; overflow: hidden; } '
     html += '.grid-cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0px; } '
-    html += '.day { aspect-ratio: 1/1; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 0.7rem; border: 1px solid rgba(255,255,255,0.05); position: relative; } '
+    html += '.day { aspect-ratio: 1/1; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 0.75rem; border: 1px solid rgba(255,255,255,0.05); position: relative; } '
     html += '.occupied { color: white; font-weight: 700; border-width: 2px !important; } '
-    html += '.cleaning-day { border: 2px dashed #475569; background: rgba(71, 85, 105, 0.1); } '
-    html += '.btn-clean { font-size: 0.55rem; margin-top: 1px; padding: 1px 3px; border-radius: 3px; background: #334155; cursor: pointer; border: 1px solid rgba(255,255,255,0.1); } '
-    html += '.btn-clean.active { background: #22c55e; color: white; border-color: #22c55e; } '
-    html += '.badge-out { font-size: 0.5rem; background: rgba(0,0,0,0.3); padding: 0px 3px; border-radius: 2px; margin-bottom: 1px; color: #cbd5e1; } '
+    html += '.cleaning-needed { border: 2px solid #eab308 !important; background: rgba(234, 179, 8, 0.1) !important; } '
+    html += '.btn-clean { font-size: 0.5rem; margin-top: 4px; padding: 2px 5px; border-radius: 4px; background: #eab308; color: #451a03; font-weight: 800; cursor: pointer; text-transform: uppercase; } '
+    html += '.btn-clean.done { background: #22c55e; color: white; } '
+    html += '.badge-out { font-size: 0.5rem; background: rgba(0,0,0,0.5); padding: 1px 4px; border-radius: 3px; color: #fb7185; font-weight: 900; margin-bottom: 2px; } '
     html += '.free { color: #475569; } '
     html += '</style></head><body>'
-    html += '<div class="p-8 max-w-7xl mx-auto"><h1 class="text-3xl font-black mb-8 border-b border-slate-800 pb-4 tracking-tighter">DASHBOARD DIVONA</h1>'
+    html += '<div class="p-8 max-w-7xl mx-auto"><h1 class="text-3xl font-black mb-8 border-b border-slate-800 pb-4">DIVONA DASHBOARD</h1>'
     html += '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">'
 
     for mes in range(3, 12):
@@ -96,7 +88,7 @@ def generar_dashboard():
         primer_dia = calendar.monthrange(2026, mes)[0]
         _, t_color = get_day_season(datetime(2026, mes, 15))
         
-        html += '<div class="month-card shadow-xl">'
+        html += '<div class="month-card shadow-2xl">'
         html += '<div class="p-4 border-b border-slate-700 font-bold text-xs uppercase" style="color:'+t_color+'">'+MESES_NOMBRES[mes]+'</div>'
         html += '<div class="p-4"><div class="grid-cal">'
         for _ in range(primer_dia): html += '<div class="day border-none"></div>'
@@ -104,32 +96,26 @@ def generar_dashboard():
         for dia in range(1, ultimo + 1):
             f_act = datetime(2026, mes, dia).date()
             res = ocupacion.get(f_act)
-            is_limp = limpiezas.get(f_act)
+            necesita_limpieza = limpiezas.get(f_act)
             
-            # Casos posibles:
-            # 1. Ocupado y además es día de limpieza (Turnover)
-            if res and is_limp:
-                html += '<div class="day occupied" style="background-color:'+res['color']+'22; border-color:'+res['color']+'">'
-                html += '<span class="badge-out">SALIDA</span>'
-                html += '<span>'+str(dia)+'</span>'
-                html += '<button onclick="this.classList.toggle(\'active\'); this.innerText=this.classList.contains(\'active\')?\'OK ✅\':\'🧹 LIMP\'" class="btn-clean">🧹 LIMP</button>'
-                html += '</div>'
+            css_classes = "day"
+            style = ""
+            content = "<span>"+str(dia)+"</span>"
             
-            # 2. Solo ocupado
-            elif res:
-                badge = '<span class="badge-out">SALIDA</span>' if res['es_salida'] else ''
-                html += '<div onclick="alert(\''+res['nombre']+'\')" class="day occupied" style="background-color:'+res['color']+'22; border-color:'+res['color']+'">'
-                html += badge + '<span>'+str(dia)+'</span>'
-                html += '</div>'
+            if res:
+                css_classes += " occupied"
+                style = "background-color:"+res['color']+"22; border-color:"+res['color']+";"
+                if res['es_fin']: content = '<span class="badge-out">SALIDA</span>' + content
             
-            # 3. Solo limpieza (día libre)
-            elif is_limp:
-                html += '<div class="day cleaning-day"><span>'+str(dia)+'</span><button onclick="this.classList.toggle(\'active\'); this.innerText=this.classList.contains(\'active\')?\'OK ✅\':\'🧹 LIMP\'" class="btn-clean">🧹 LIMP</button></div>'
+            if necesita_limpieza:
+                css_classes += " cleaning-needed"
+                content += '<button onclick="this.classList.toggle(\'done\'); this.innerText=this.classList.contains(\'done\')?\'LISTO ✅\':\'🧹 AVISAR\';" class="btn-clean">🧹 AVISAR</button>'
             
-            # 4. Día libre total
-            else:
-                html += '<div class="day free">'+str(dia)+'</div>'
-        
+            if not res and not necesita_limpieza:
+                css_classes += " free"
+                
+            html += '<div class="' + css_classes + '" style="' + style + '">' + content + '</div>'
+            
         html += '</div></div></div>'
 
     html += '</div></div></body></html>'
