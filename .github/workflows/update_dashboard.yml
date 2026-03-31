@@ -2,14 +2,14 @@ name: Actualizar Dashboard Divona
 
 on:
   schedule:
-    - cron: '0 * * * *' # Se ejecuta automáticamente cada hora
-  workflow_dispatch: # Te permite ejecutarlo a mano cuando quieras
+    - cron: '0 * * * *'
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Permiso necesario para que el robot guarde la web
+      contents: write
     steps:
       - name: Descargar código
         uses: actions/checkout@v4
@@ -33,6 +33,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add index.html
-          # El '|| echo' es la clave: evita el error si no hay nada nuevo que subir
-          git commit -m "Actualización automática Dashboard" || echo "No hay cambios para actualizar"
+          git commit -m "Update Dashboard" || echo "Sin cambios"
           git push
