@@ -36,7 +36,8 @@ def generar_dashboard():
     if res.status_code != 200: return
 
     ocupacion = {} 
-    # Colores más sobrios y elegantes
+    limpiezas = {} 
+    
     COLORES = ["#60a5fa", "#a78bfa", "#f472b6", "#34d399", "#fbbf24", "#22d3ee", "#fb7185", "#818cf8"]
 
     for r in res.json().get("results", []):
@@ -44,32 +45,50 @@ def generar_dashboard():
         f_data = p.get("Fecha", {}).get("date", {})
         if not f_data: continue
         
-        start = datetime.strptime(f_data.get("start")[:10], "%Y-%m-%d")
-        end = datetime.strptime((f_data.get("end") or f_data.get("start"))[:10], "%Y-%m-%d")
+        start = datetime.strptime(f_data.get("start")[:10], "%Y-%m-%d").date()
+        end = datetime.strptime((f_data.get("end") or f_data.get("start"))[:10], "%Y-%m-%d").date()
         
         res_id = r["id"]
         color_idx = sum(ord(c) for c in res_id) % len(COLORES)
         color_reserva = COLORES[color_idx]
 
-        info = {"nombre": get_safe_text(p.get("Nombre")), "color": color_reserva}
+        info = {
+            "nombre": get_safe_text(p.get("Nombre")), 
+            "color": color_reserva,
+            "es_salida": False
+        }
         
+        # Guardamos los días de la reserva
         curr = start
         while curr <= end:
-            ocupacion[curr.date()] = info
+            # Marcamos si es el último día (Check-out)
+            dia_info = info.copy()
+            if curr == end:
+                dia_info["es_salida"] = True
+            
+            ocupacion[curr] = dia_info
             curr += timedelta(days=1)
+        
+        # El día de limpieza es el anterior al inicio
+        dia_limp = start - timedelta(days=1)
+        limpiezas[dia_limp] = True
 
-    # HTML con el nuevo diseño de bordes y agrupación
-    html = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>DIVONA</title>'
+    # HTML
+    html = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>DIVONA CONTROL</title>'
     html += '<script src="https://cdn.tailwindcss.com"></script>'
     html += '<style>'
     html += 'body { background-color: #0f172a; font-family: sans-serif; color: #f1f5f9; } '
     html += '.month-card { background: #1e293b; border: 1px solid #334155; border-radius: 1rem; overflow: hidden; } '
-    html += '.grid-cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0px; } ' # Gap 0 para que los bordes se peguen
-    html += '.day { aspect-ratio: 1/1; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; border: 1px solid rgba(255,255,255,0.05); } '
-    html += '.occupied { color: white; font-weight: 700; cursor: pointer; border-width: 2px !important; } '
+    html += '.grid-cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0px; } '
+    html += '.day { aspect-ratio: 1/1; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 0.7rem; border: 1px solid rgba(255,255,255,0.05); position: relative; } '
+    html += '.occupied { color: white; font-weight: 700; border-width: 2px !important; } '
+    html += '.cleaning-day { border: 2px dashed #475569; background: rgba(71, 85, 105, 0.1); } '
+    html += '.btn-clean { font-size: 0.55rem; margin-top: 1px; padding: 1px 3px; border-radius: 3px; background: #334155; cursor: pointer; border: 1px solid rgba(255,255,255,0.1); } '
+    html += '.btn-clean.active { background: #22c55e; color: white; border-color: #22c55e; } '
+    html += '.badge-out { font-size: 0.5rem; background: rgba(0,0,0,0.3); padding: 0px 3px; border-radius: 2px; margin-bottom: 1px; color: #cbd5e1; } '
     html += '.free { color: #475569; } '
     html += '</style></head><body>'
-    html += '<div class="p-8 max-w-7xl mx-auto"><h1 class="text-3xl font-black mb-8 border-b border-slate-800 pb-4">DASHBOARD DIVONA</h1>'
+    html += '<div class="p-8 max-w-7xl mx-auto"><h1 class="text-3xl font-black mb-8 border-b border-slate-800 pb-4 tracking-tighter">DASHBOARD DIVONA</h1>'
     html += '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">'
 
     for mes in range(3, 12):
@@ -80,15 +99,34 @@ def generar_dashboard():
         html += '<div class="month-card shadow-xl">'
         html += '<div class="p-4 border-b border-slate-700 font-bold text-xs uppercase" style="color:'+t_color+'">'+MESES_NOMBRES[mes]+'</div>'
         html += '<div class="p-4"><div class="grid-cal">'
-        
         for _ in range(primer_dia): html += '<div class="day border-none"></div>'
         
         for dia in range(1, ultimo + 1):
             f_act = datetime(2026, mes, dia).date()
             res = ocupacion.get(f_act)
-            if res:
-                # Fondo muy suave (15 de opacidad) y borde fuerte del mismo color
-                html += '<div onclick="alert(\''+res['nombre']+'\')" class="day occupied" style="background-color:'+res['color']+'22; border-color:'+res['color']+'">'+str(dia)+'</div>'
+            is_limp = limpiezas.get(f_act)
+            
+            # Casos posibles:
+            # 1. Ocupado y además es día de limpieza (Turnover)
+            if res and is_limp:
+                html += '<div class="day occupied" style="background-color:'+res['color']+'22; border-color:'+res['color']+'">'
+                html += '<span class="badge-out">SALIDA</span>'
+                html += '<span>'+str(dia)+'</span>'
+                html += '<button onclick="this.classList.toggle(\'active\'); this.innerText=this.classList.contains(\'active\')?\'OK ✅\':\'🧹 LIMP\'" class="btn-clean">🧹 LIMP</button>'
+                html += '</div>'
+            
+            # 2. Solo ocupado
+            elif res:
+                badge = '<span class="badge-out">SALIDA</span>' if res['es_salida'] else ''
+                html += '<div onclick="alert(\''+res['nombre']+'\')" class="day occupied" style="background-color:'+res['color']+'22; border-color:'+res['color']+'">'
+                html += badge + '<span>'+str(dia)+'</span>'
+                html += '</div>'
+            
+            # 3. Solo limpieza (día libre)
+            elif is_limp:
+                html += '<div class="day cleaning-day"><span>'+str(dia)+'</span><button onclick="this.classList.toggle(\'active\'); this.innerText=this.classList.contains(\'active\')?\'OK ✅\':\'🧹 LIMP\'" class="btn-clean">🧹 LIMP</button></div>'
+            
+            # 4. Día libre total
             else:
                 html += '<div class="day free">'+str(dia)+'</div>'
         
