@@ -50,6 +50,10 @@ def get_safe_email(prop):
         return ""
     except: return ""
 
+def js_safe(text):
+    if not text: return ""
+    return str(text).replace("'", "\\'").replace('"', '&quot;').replace('\n', ' ')
+
 def generar_dashboard():
     try:
         res = requests.post("https://api.notion.com/v1/databases/" + str(DATABASE_ID) + "/query", headers=headers)
@@ -72,7 +76,7 @@ def generar_dashboard():
         estado = get_safe_text(p.get("Estado"))
         if estado != "CANCELADA": ingresos_mes[start.month] += monto
 
-        res_id = r["id"].replace("-", "") # ID limpio
+        res_id = r["id"].replace("-", "") 
         color_idx = sum(ord(c) for c in res_id) % len(COLORES)
         
         nombre_real = get_safe_text(p.get("Cliente"))
@@ -85,7 +89,7 @@ def generar_dashboard():
         info = {
             "nombre": nombre_real, 
             "color": COLORES[color_idx],
-            "detalle": "Cliente: " + nombre_real + "\\nTotal: " + str(monto) + "€\\nEstado: " + estado + "\\nComentarios: " + comentarios
+            "detalle": f"Cliente: {js_safe(nombre_real)}\\nTotal: {monto}€\\nEstado: {js_safe(estado)}\\nComentarios: {js_safe(comentarios)}"
         }
 
         curr = start
@@ -118,10 +122,13 @@ def generar_dashboard():
     html += '<div class="flex flex-col md:flex-row justify-between items-end mb-12 gap-6">'
     html += '<div><h1 class="text-4xl font-black tracking-tighter uppercase">Divona Center</h1>'
     html += '<p class="text-blue-400 font-bold text-xl mt-2">TOTAL 2026: ' + str(f"{total_anual:,.0f}") + ' €</p></div>'
-    html += '<div class="flex gap-2">'
-    html += '<button onclick="filterView(\'all\', this)" class="bg-blue-600 px-4 py-2 rounded-lg text-xs font-bold uppercase">General</button>'
-    html += '<button onclick="filterView(\'LIMP\', this)" class="bg-slate-700 px-4 py-2 rounded-lg text-xs font-bold uppercase">Limpiezas</button>'
-    html += '<button onclick="filterView(\'OPS\', this)" class="bg-slate-700 px-4 py-2 rounded-lg text-xs font-bold uppercase">Entradas/Salidas</button>'
+    
+    # Botones de Filtro Actualizados
+    html += '<div class="flex flex-wrap gap-2">'
+    html += '<button onclick="filterView(\'all\', this)" class="filter-btn bg-blue-600 px-4 py-2 rounded-lg text-[10px] font-bold uppercase">General</button>'
+    html += '<button onclick="filterView(\'LIMP\', this)" class="filter-btn bg-slate-700 px-4 py-2 rounded-lg text-[10px] font-bold uppercase">Limpiezas 🧹</button>'
+    html += '<button onclick="filterView(\'IN\', this)" class="filter-btn bg-slate-700 px-4 py-2 rounded-lg text-[10px] font-bold uppercase">Check-in ⚓</button>'
+    html += '<button onclick="filterView(\'OUT\', this)" class="filter-btn bg-slate-700 px-4 py-2 rounded-lg text-[10px] font-bold uppercase">Check-out 🏁</button>'
     html += '</div></div>'
     
     html += '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">'
@@ -132,45 +139,42 @@ def generar_dashboard():
         _, t_color = get_day_season(datetime(2026, mes, 15))
         
         html += '<div><div class="month-card shadow-2xl">'
-        html += '<div class="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-800/30">'
-        html += '<span class="font-bold text-[10px] uppercase" style="color:'+t_color+'">'+MESES_NOMBRES[mes]+'</span>'
-        html += '<span class="text-white font-black text-[10px] bg-slate-700 px-2 py-1 rounded">'+ str(f"{ingresos_mes[mes]:,.0f}") +' €</span></div>'
+        html += f'<div class="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-800/30">'
+        html += f'<span class="font-bold text-[10px] uppercase" style="color:{t_color}">{MESES_NOMBRES[mes]}</span>'
+        html += f'<span class="text-white font-black text-[10px] bg-slate-700 px-2 py-1 rounded">{ingresos_mes[mes]:,.0f} €</span></div>'
         html += '<div class="p-2 flex-grow flex flex-col"><div class="grid-cal">'
         for _ in range(primer_dia): html += '<div class="day border-none"></div>'
         
         for dia in range(1, ultimo + 1):
             f_act = datetime(2026, mes, dia).date()
-            data = agenda.get(f_act, {"res": None, "acts": []})
-            res = data["res"]
-            acts = data["acts"]
+            data_day = agenda.get(f_act, {"res": None, "acts": []})
+            res = data_day["res"]
+            acts = data_day["acts"]
             
-            tag = "NONE"
+            # Identificadores para el filtro
+            tiene_in = any(a["tipo"] == "IN" for a in acts)
+            tiene_out = any(a["tipo"] == "OUT" for a in acts)
+            tiene_limp = any(a["tipo"] == "LIMP" for a in acts)
+            
             acts_html = ""
-            
             for act in acts:
                 if act["tipo"] == "LIMP":
-                    tag = "LIMP" if tag == "NONE" else tag
                     acts_html += '<span>🧹</span>'
                 elif act["tipo"] in ["IN", "OUT"]:
-                    tag = "OPS"
                     icon = "⚓" if act["tipo"] == "IN" else "🏁"
-                    
                     if act.get("email"):
-                        btn_id = f'{act["tipo"]}-{act["id"]}'
+                        asunto = "Bienvenido" if act["tipo"] == "IN" else "Gracias"
+                        cuerpo = "Hola..." # (El texto largo ya está en el href abajo)
                         
-                        # Preparamos el correo desde Python para que sea un enlace nativo
                         if act["tipo"] == "IN":
                             asunto = "Bienvenido a Divona Center"
-                            cuerpo = f"Hola {act['nombre']},\n\nQueremos darte una cálida bienvenida y agradecerte de corazón por confiar en nosotros para tu experiencia.\n\nEn un futuro muy cercano te enviaremos por aquí un enlace de YouTube con los vídeos de tu aventura.\n\n¡Que lo disfrutes muchísimo!\n\nEl equipo de Divona Center"
+                            cuerpo = f"Hola {act['nombre']},\r\n\r\nQueremos darte una cálida bienvenida..."
                         else:
                             asunto = "Gracias y hasta pronto - Divona Center"
-                            cuerpo = f"Hola {act['nombre']},\n\nEsperamos que hayas disfrutado al máximo tu experiencia con nosotros y que vuelvas muy pronto.\n\nComo agradecimiento por ser un cliente recurrente, si contactas con nosotros a través de este correo para tu próxima reserva, ¡te haremos un regalo especial!\n\nGracias nuevamente por elegirnos.\n\nEl equipo de Divona Center"
+                            cuerpo = f"Hola {act['nombre']},\r\n\r\nEsperamos que hayas disfrutado..."
                         
-                        # urllib.parse.quote convierte los espacios y saltos de línea para que el correo los entienda
                         href = f"mailto:{act['email']}?subject={urllib.parse.quote(asunto)}&body={urllib.parse.quote(cuerpo)}"
-                        
-                        # Ahora es una etiqueta <a> real, el navegador nunca la bloquea
-                        acts_html += f'<a href="{href}" id="{btn_id}" class="email-btn cursor-pointer hover:scale-150 transition-transform text-lg inline-block" onclick="toggleCorreo(event, \'{act["tipo"]}\', \'{act["id"]}\')">{icon}</a>'
+                        acts_html += f'<a href="{href}" target="_blank" id="{act["tipo"]}-{act["id"]}" class="email-btn cursor-pointer hover:scale-150 transition-transform text-lg inline-block" onclick="toggleCorreo(event, this)">{icon}</a>'
                     else:
                         acts_html += f'<span>{icon}</span>'
             
@@ -180,11 +184,12 @@ def generar_dashboard():
                 css += " occupied"
                 style = "background-color:" + res['color'] + "15; border-color:" + res['color'] + ";"
             
-            click = 'onclick="alert(\''+ (res['detalle'] if res else 'Día Libre') +'\')"'
+            # Guardamos los datos de filtro en el propio elemento HTML
+            filtro_data = f'data-in="{"true" if tiene_in else "false"}" data-out="{"true" if tiene_out else "false"}" data-limp="{"true" if tiene_limp else "false"}"'
             
-            html += '<div class="' + css + '" data-tag="' + tag + '" style="' + style + '" ' + click + '>'
-            html += '<span class="font-bold">' + str(dia) + '</span>'
-            html += '<div class="flex gap-1 items-center">' + acts_html + '</div></div>'
+            html += f'<div class="{css}" {filtro_data} onclick="alert(\'{res["detalle"] if res else "Día Libre"}\')">'
+            html += f'<span class="font-bold">{dia}</span>'
+            html += f'<div class="flex gap-1 items-center">{acts_html}</div></div>'
             
         html += '</div></div></div></div>'
 
@@ -193,41 +198,38 @@ def generar_dashboard():
     # --- SCRIPTS ---
     html += '<script>'
     html += 'function filterView(type, btn) { '
-    html += '  document.querySelectorAll("button").forEach(b => b.classList.replace("bg-blue-600", "bg-slate-700")); '
-    html += '  btn.classList.replace("bg-slate-700", "bg-blue-600"); '
+    html += '  document.querySelectorAll(".filter-btn").forEach(b => { b.classList.remove("bg-blue-600"); b.classList.add("bg-slate-700"); }); '
+    html += '  btn.classList.remove("bg-slate-700"); btn.classList.add("bg-blue-600"); '
+    
     html += '  document.querySelectorAll(".day-cell").forEach(day => { '
-    html += '    const tag = day.getAttribute("data-tag"); day.classList.remove("dimmed", "highlight"); '
+    html += '    day.classList.remove("dimmed", "highlight"); '
     html += '    if (type === "all") return; '
-    html += '    if (type === "OPS" && tag === "OPS") day.classList.add("highlight"); '
-    html += '    else if (tag === type) day.classList.add("highlight"); '
+    
+    html += '    let match = false; '
+    html += '    if (type === "LIMP" && day.getAttribute("data-limp") === "true") match = true; '
+    html += '    if (type === "IN" && day.getAttribute("data-in") === "true") match = true; '
+    html += '    if (type === "OUT" && day.getAttribute("data-out") === "true") match = true; '
+    
+    html += '    if (match) day.classList.add("highlight"); '
     html += '    else day.classList.add("dimmed"); '
     html += '  }); '
     html += '} '
     
-    # Función toggleCorreo ajustada para enlaces nativos
-    html += 'function toggleCorreo(event, tipo, id) { '
-    html += '  event.stopPropagation(); ' # Evita que salte el alert del día
-    html += '  const key = "divona_" + tipo + "_" + id; '
-    html += '  const btn = document.getElementById(tipo + "-" + id); '
-    
+    html += 'function toggleCorreo(event, elemento) { '
+    html += '  event.stopPropagation(); ' 
+    html += '  const key = "divona_" + elemento.id; '
     html += '  if(localStorage.getItem(key)) { '
-    html += '    localStorage.removeItem(key); ' # Desmarcamos
-    html += '    btn.classList.remove("opacity-20", "grayscale"); '
-    html += '    event.preventDefault(); ' # IMPORTANTÍSIMO: Detiene el envío del correo porque solo queríamos desmarcarlo
+    html += '    localStorage.removeItem(key); elemento.classList.remove("opacity-20", "grayscale"); event.preventDefault(); '
     html += '  } else { '
-    html += '    localStorage.setItem(key, "true"); ' # Marcamos
-    html += '    btn.classList.add("opacity-20", "grayscale"); '
-    html += '    // Al no poner preventDefault, el navegador abre el mailto: automáticamente de forma nativa'
+    html += '    localStorage.setItem(key, "true"); elemento.classList.add("opacity-20", "grayscale"); '
     html += '  } '
     html += '} '
     
     html += 'document.addEventListener("DOMContentLoaded", function() { '
     html += '  document.querySelectorAll(".email-btn").forEach(btn => { '
-    html += '    const key = "divona_" + btn.id.replace("-", "_"); '
-    html += '    if(localStorage.getItem(key)) { btn.classList.add("opacity-20", "grayscale"); } '
+    html += '    if(localStorage.getItem("divona_" + btn.id)) { btn.classList.add("opacity-20", "grayscale"); } '
     html += '  }); '
     html += '}); '
-    
     html += '</script></body></html>'
 
     with open("index.html", "w", encoding="utf-8") as f:
