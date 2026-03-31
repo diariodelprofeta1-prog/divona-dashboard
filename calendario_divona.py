@@ -87,9 +87,12 @@ def generar_dashboard():
     html += '<script src="https://cdn.tailwindcss.com"></script>'
     html += '<style>'
     html += 'body { background-color: #0f172a; font-family: sans-serif; color: #f1f5f9; } '
-    html += '.month-card { background: #1e293b; border: 1px solid #334155; border-radius: 1rem; overflow: hidden; height: 100%; } '
-    html += '.grid-cal { display: grid; grid-template-columns: repeat(7, 1fr); grid-template-rows: repeat(6, 1fr); gap: 0px; min-height: 240px; } '
-    html += '.day { aspect-ratio: 1/1; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 4px 0; font-size: 0.65rem; border: 1px solid rgba(255,255,255,0.03); } '
+    # Cambio aquí: Añadido flex y flex-col a month-card para que la cuadrícula respire
+    html += '.month-card { background: #1e293b; border: 1px solid #334155; border-radius: 1rem; overflow: hidden; height: 100%; display: flex; flex-direction: column; } '
+    # Cambio aquí: Añadido flex-grow
+    html += '.grid-cal { display: grid; grid-template-columns: repeat(7, 1fr); grid-template-rows: repeat(6, 1fr); gap: 0px; flex-grow: 1; min-height: 240px; } '
+    # Cambio Clave: Quitado 'aspect-ratio: 1/1' y puesto un min-height
+    html += '.day { min-height: 45px; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 4px 0; font-size: 0.65rem; border: 1px solid rgba(255,255,255,0.03); } '
     html += '.occupied { border-width: 2px !important; cursor: pointer; } '
     html += '.dimmed { opacity: 0.1; filter: grayscale(1); } '
     html += '.highlight { border: 2px solid white !important; background: rgba(255,255,255,0.05); } '
@@ -118,7 +121,7 @@ def generar_dashboard():
         html += '<div class="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-800/30">'
         html += '<span class="font-bold text-[10px] uppercase" style="color:'+t_color+'">'+MESES_NOMBRES[mes]+'</span>'
         html += '<span class="text-white font-black text-[10px] bg-slate-700 px-2 py-1 rounded">'+ str(f"{ingresos_mes[mes]:,}") +' €</span></div>'
-        html += '<div class="p-2"><div class="grid-cal">'
+        html += '<div class="p-2 flex-grow flex flex-col"><div class="grid-cal">'
         for _ in range(primer_dia): html += '<div class="day border-none"></div>'
         
         for dia in range(1, ultimo + 1):
