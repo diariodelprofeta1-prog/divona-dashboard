@@ -36,37 +36,38 @@ def get_safe_text(prop):
 def generar_dashboard():
     res = requests.post(f"https://api.notion.com/v1/databases/{DATABASE_ID}/query", headers=headers)
     ocupacion = {} 
-    limpiezas_previas = {} # Para detectar el día antes de la reserva
+    
+    # Lista de colores para diferenciar reservas
+    COLORES = ["#3b82f6", "#8b5cf6", "#ec4899", "#10b981", "#f59e0b", "#06b6d4"]
 
     for r in res.json().get("results", []):
         p = r["properties"]
         f_data = p.get("Fecha", {}).get("date", {})
         if not f_data: continue
-        
         start = datetime.strptime(f_data.get("start")[:10], "%Y-%m-%d")
         end = datetime.strptime((f_data.get("end") or f_data.get("start"))[:10], "%Y-%m-%d")
         
-        # Guardamos la info incluyendo el ID y el estado de las nuevas columnas de fecha
+        # Asignamos un color fijo a cada reserva basado en su nombre
+        nombre_reserva = get_safe_text(p.get("Nombre"))
+        idx_color = sum(ord(c) for c in nombre_reserva) % len(COLORES)
+        color_reserva = COLORES[idx_color]
+
         info = {
-            "id": r["id"],
-            "nombre": get_safe_text(p.get("Nombre")), 
-            "inicio": start.date(), 
-            "fin": end.date(), 
-            "estado": get_safe_text(p.get("Estado")),
-            "limp_ok": p.get("Limpieza", {}).get("date") is not None,
-            "in_ok": p.get("Check-in", {}).get("date") is not None,
-            "out_ok": p.get("Check-out", {}).get("date") is not None
+            "nombre": nombre_reserva, 
+            "inicio": start, 
+            "fin": end, 
+            "estado": get_safe_text(p.get("Estado")), 
+            "tel": get_safe_text(p.get("Teléfono")), 
+            "dni": get_safe_text(p.get("DNI titular")), 
+            "coment": get_safe_text(p.get("COMENTARIOS")),
+            "color": color_reserva # Guardamos el color
         }
         
         curr = start
         while curr <= end:
             ocupacion[curr.date()] = info
             curr += timedelta(days=1)
-        
-        # Día antes del inicio para el botón de limpieza
-        limpiezas_previas[(start - timedelta(days=1)).date()] = info
 
-    # HTML TOP - Sin f-string para evitar el error de las llaves {}
     html = """
     <!DOCTYPE html>
     <html lang="es">
@@ -75,17 +76,15 @@ def generar_dashboard():
         <title>SAILBOAT CHARTER MALLORCA</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=Cinzel:wght@700&display=swap" rel="stylesheet">
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
         <style>
             body { background-color: #0f172a; font-family: 'Inter', sans-serif; color: #f1f5f9; }
             h1 { font-family: 'Cinzel', serif; letter-spacing: 2px; }
             .month-card { background: #1e293b; border: 1px solid #334155; border-radius: 1.5rem; overflow: hidden; }
             .grid-cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
-            .day { aspect-ratio: 1/1; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 0.7rem; border-radius: 6px; position: relative; }
-            .occupied { background: #3b82f6; color: white; font-weight: 900; cursor: pointer; }
+            .day { aspect-ratio: 1/1; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; border-radius: 6px; }
+            .occupied { color: white; font-weight: 900; cursor: pointer; }
             .free { background: rgba(255,255,255,0.03); color: #475569; }
-            .btn-act { font-size: 0.4rem; padding: 2px 0; border-radius: 3px; margin-top: 2px; width: 90%; font-weight: 900; border: none; text-transform: uppercase; cursor: pointer; }
-            .btn-off { background: #f59e0b; color: #451a03; }
-            .btn-on { background: #22c55e; color: white; cursor: default; }
         </style>
     </head>
     <body class="p-4 md:p-8">
@@ -99,6 +98,7 @@ def generar_dashboard():
                     </div>
                 </div>
             </div>
+
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
     """
 
@@ -106,69 +106,30 @@ def generar_dashboard():
         ultimo = calendar.monthrange(2026, mes)[1]
         primer_dia = calendar.monthrange(2026, mes)[0]
         f_mid = datetime(2026, mes, 15)
-        _, t_color, _ = get_day_season(f_mid)
+        t_nombre, t_color, _ = get_day_season(f_mid)
         ocupados = sum(1 for d in range(1, ultimo + 1) if datetime(2026, mes, d).date() in ocupacion)
         
-        # Usamos concatenación manual para evitar el error de llaves de Python
-        html += '<div class="month-card shadow-2xl">'
-        html += '<div class="p-4 flex justify-between items-center" style="background: ' + t_color + '15; border-bottom: 2px solid ' + t_color + '">'
-        html += '<span class="font-black text-xs" style="color: ' + t_color + '">' + MESES_NOMBRES[mes].upper() + '</span>'
-        html += '<span class="text-[10px] font-black" style="color: ' + t_color + '">' + str(ocupados) + '/' + str(ultimo) + ' DÍAS</span></div>'
-        html += '<div class="p-4"><div class="grid grid-cols-7 gap-1 text-[8px] text-slate-600 font-bold mb-3 text-center"><span>L</span><span>M</span><span>X</span><span>J</span><span>V</span><span>S</span><span>D</span></div><div class="grid-cal">'
+        html += f"""
+        <div class="month-card shadow-2xl">
+            <div class="p-4 flex justify-between items-center" style="background: {t_color}15; border-bottom: 2px solid {t_color}">
+                <span class="font-black text-xs" style="color: {t_color}">{MESES_NOMBRES[mes].upper()}</span>
+                <span class="text-[10px] font-black" style="color: {t_color}">{ocupados}/{ultimo} DÍAS</span>
+            </div>
+            <div class="p-4"><div class="grid grid-cols-7 gap-1 text-[8px] text-slate-600 font-bold mb-3 text-center"><span>L</span><span>M</span><span>X</span><span>J</span><span>V</span><span>S</span><span>D</span></div><div class="grid-cal">"""
         
         for _ in range(primer_dia): html += '<div></div>'
+        
         for dia in range(1, ultimo + 1):
             f_actual = datetime(2026, mes, dia).date()
             res = ocupacion.get(f_actual)
-            limp = limpiezas_previas.get(f_actual)
-            
             if res:
-                btn_h = ""
-                # Si es el primer día de la reserva -> Botón Check-in
-                if res['inicio'] == f_actual:
-                    cl, txt = ("btn-on", "IN OK ✅") if res['in_ok'] else ("btn-off", "⚓ IN")
-                    btn_h = '<button class="btn-act ' + cl + '" onclick="event.stopPropagation(); mark(\'' + res['id'] + '\', \'Check-in\', this)">' + txt + '</button>'
-                # Si es el último día -> Botón Check-out
-                elif res['fin'] == f_actual:
-                    cl, txt = ("btn-on", "OUT OK ✅") if res['out_ok'] else ("btn-off", "🏁 OUT")
-                    btn_h = '<button class="btn-act ' + cl + '" onclick="event.stopPropagation(); mark(\'' + res['id'] + '\', \'Check-out\', this)">' + txt + '</button>'
-                
-                html += '<div onclick=\'alert("' + res['nombre'] + ' - ' + res['estado'] + '")\' class="day occupied"><span>' + str(dia) + '</span>' + btn_h + '</div>'
-            elif limp:
-                # El día antes de la reserva -> Botón Limpieza
-                cl, txt = ("btn-on", "LIMP OK ✅") if limp['limp_ok'] else ("btn-off", "🧹 LIMP")
-                btn_l = '<button class="btn-act ' + cl + '" onclick="mark(\'' + limp['id'] + '\', \'Limpieza\', this)">' + txt + '</button>'
-                html += '<div class="day free"><span>' + str(dia) + '</span>' + btn_l + '</div>'
+                # El único cambio real está aquí: añadimos el 'style' con el color de la reserva
+                html += f'<div onclick=\'alert("{res["nombre"]} - {res["estado"]}")\' class="day occupied" style="background-color: {res["color"]}">{dia}</div>'
             else:
-                html += '<div class="day free">' + str(dia) + '</div>'
+                html += f'<div class="day free">{dia}</div>'
         html += "</div></div></div>"
 
-    # FOOTER Y JAVASCRIPT - Inyectamos el TOKEN de forma segura al final
-    html += """</div></div><script>
-    async function mark(id, prop, btn) {
-        if (btn.classList.contains('btn-on')) return;
-        const today = new Date().toISOString().split('T')[0];
-        btn.innerText = "...";
-        try {
-            const r = await fetch('https://api.notion.com/v1/pages/' + id, {
-                method: 'PATCH',
-                headers: { 
-                    'Authorization': 'Bearer """ + TOKEN + """', 
-                    'Notion-Version': '2022-06-28', 
-                    'Content-Type': 'application/json' 
-                },
-                body: JSON.stringify({ properties: { [prop]: { date: { start: today } } } })
-            });
-            if (r.ok) {
-                btn.innerText = (prop === "Limpieza" ? "LIMP" : prop.toUpperCase()) + " OK ✅";
-                btn.className = "btn-act btn-on";
-                btn.onclick = null;
-            }
-        } catch(e) { alert("Error de red"); }
-    }</script></body></html>"""
-    
-    with open("index.html", "w", encoding="utf-8") as f:
-        f.write(html)
+    html += "</div></div></body></html>"
+    with open("index.html", "w", encoding="utf-8") as f: f.write(html)
 
-if __name__ == "__main__":
-    generar_dashboard()
+if __name__ == "__main__": generar_dashboard()
