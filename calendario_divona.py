@@ -56,7 +56,6 @@ def generar_dashboard():
         start = datetime.strptime(f_data.get("start")[:10], "%Y-%m-%d").date()
         end = datetime.strptime((f_data.get("end") or f_data.get("start"))[:10], "%Y-%m-%d").date()
         
-        # OBTENER DINERO (Asegúrate que la columna se llame 'Precio')
         monto = get_safe_num(p.get("Precio"))
         ingresos_mes[start.month] += monto
 
@@ -82,7 +81,6 @@ def generar_dashboard():
         if limp not in agenda: agenda[limp] = {"res": None, "acts": []}
         agenda[limp]["acts"].append("LIMP")
 
-    # HTML
     html = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>DIVONA 2026</title>'
     html += '<script src="https://cdn.tailwindcss.com"></script>'
     html += '<style>'
@@ -95,7 +93,6 @@ def generar_dashboard():
     html += '.highlight { border: 2px solid white !important; background: rgba(255,255,255,0.05); } '
     html += '</style></head><body>'
     
-    # TOTAL ANUAL
     total_anual = sum(ingresos_mes.values())
     html += '<div class="p-8 max-w-7xl mx-auto">'
     html += '<div class="flex flex-col md:flex-row justify-between items-end mb-12 gap-6">'
@@ -123,9 +120,9 @@ def generar_dashboard():
         
         for dia in range(1, ultimo + 1):
             f_act = datetime(2026, mes, dia).date()
-            data = agenda.get(f_act, {"res": None, "acts": []})
-            res = data["res"]
-            acts = data["acts"]
+            data_dia = agenda.get(f_act, {"res": None, "acts": []})
+            res = data_dia["res"]
+            acts = data_dia["acts"]
             
             tag = "NONE"
             if "LIMP" in acts: tag = "LIMP"
@@ -159,3 +156,12 @@ def generar_dashboard():
     html += '    if (type === "OPS" && tag === "OPS") day.classList.add("highlight"); '
     html += '    else if (tag === type) day.classList.add("highlight"); '
     html += '    else day.classList.add("dimmed"); '
+    html += '  }); '
+    html += '} '
+    html += '</script></body></html>'
+
+    with open("index.html", "w", encoding="utf-8") as f:
+        f.write(html)
+
+if __name__ == "__main__":
+    generar_dashboard()
