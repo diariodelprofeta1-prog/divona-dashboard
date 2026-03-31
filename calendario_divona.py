@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timedelta
 import calendar
 
-# Configuración (GitHub usa sus 'Secrets' aquí)
+# Configuración
 TOKEN = os.environ.get("NOTION_TOKEN")
 DATABASE_ID = os.environ.get("DATABASE_ID")
 
@@ -23,12 +23,12 @@ def get_day_season(date_obj):
     return "BAJA", "#64748b"
 
 def get_safe_text(prop):
-    if not prop: return "Reserva"
+    if not prop: return "Sin Nombre"
     try:
         t = prop.get("type")
         if t == "title": return prop["title"][0]["plain_text"] if prop["title"] else "Reserva"
         if t == "rich_text": return prop["rich_text"][0]["plain_text"] if prop["rich_text"] else "Reserva"
-        if t in ["select", "status"]: return prop[t]["name"] if prop[t] else "Reserva"
+        if t in ["select", "status"]: return prop[t]["name"] if prop[t] else ""
         return "Reserva"
     except: return "Reserva"
 
@@ -66,7 +66,7 @@ def generar_dashboard():
             "nombre": get_safe_text(p.get("Nombre")), 
             "color": COLORES[color_idx],
             "monto": monto,
-            "detalle": "Precio: " + str(monto) + "€\\nEstado: " + get_safe_text(p.get("Estado"))
+            "detalle": "Precio: " + str(monto) + "€\\nEstado: " + get_safe_text(p.get("Estado")) + "\\nComentarios: " + get_safe_text(p.get("COMENTARIOS"))
         }
 
         curr = start
@@ -81,13 +81,12 @@ def generar_dashboard():
         if limp not in agenda: agenda[limp] = {"res": None, "acts": []}
         agenda[limp]["acts"].append("LIMP")
 
-    # HTML COMPLETO CON COLORES Y FILTROS
     html = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>DIVONA 2026</title>'
     html += '<script src="https://cdn.tailwindcss.com"></script>'
     html += '<style>'
     html += 'body { background-color: #0f172a; font-family: sans-serif; color: #f1f5f9; } '
-    html += '.month-card { background: #1e293b; border: 1px solid #334155; border-radius: 1rem; overflow: hidden; } '
-    html += '.grid-cal { display: grid; grid-template-columns: repeat(7, 1fr); grid-template-rows: repeat(6, 1fr); gap: 0px; min-height: 280px; } '
+    html += '.month-card { background: #1e293b; border: 1px solid #334155; border-radius: 1rem; overflow: hidden; height: 100%; } '
+    html += '.grid-cal { display: grid; grid-template-columns: repeat(7, 1fr); grid-template-rows: repeat(6, 1fr); gap: 0px; min-height: 240px; } '
     html += '.day { aspect-ratio: 1/1; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 4px 0; font-size: 0.65rem; border: 1px solid rgba(255,255,255,0.03); } '
     html += '.occupied { border-width: 2px !important; cursor: pointer; } '
     html += '.dimmed { opacity: 0.1; filter: grayscale(1); } '
@@ -121,10 +120,13 @@ def generar_dashboard():
         
         for dia in range(1, ultimo + 1):
             f_act = datetime(2026, mes, dia).date()
-            data_d = agenda.get(f_act, {"res": None, "acts": []})
-            res = data_d["res"]
-            acts = data_d["acts"]
-            tag = "LIMP" if "LIMP" in acts else ("OPS" if ("IN" in acts or "OUT" in acts) else "NONE")
+            data_res = agenda.get(f_act, {"res": None, "acts": []})
+            res = data_res["res"]
+            acts = data_res["acts"]
+            
+            tag = "NONE"
+            if "LIMP" in acts: tag = "LIMP"
+            if "IN" in acts or "OUT" in acts: tag = "OPS"
             
             css = "day day-cell"
             style = ""
@@ -132,7 +134,7 @@ def generar_dashboard():
                 css += " occupied"
                 style = "background-color:" + res['color'] + "15; border-color:" + res['color'] + ";"
             
-            click = 'onclick="alert(\''+ (res['nombre'] if res else 'Día Libre') +'\')"'
+            click = 'onclick="alert(\''+ (res['nombre'] + '\\n' + res['detalle'] if res else 'Día Libre') +'\')"'
             
             html += '<div class="' + css + '" data-tag="' + tag + '" style="' + style + '" ' + click + '>'
             html += '<span class="font-bold">' + str(dia) + '</span>'
@@ -141,6 +143,7 @@ def generar_dashboard():
             if "IN" in acts: html += '<span>⚓</span>'
             if "OUT" in acts: html += '<span>🏁</span>'
             html += '</div></div>'
+            
         html += '</div></div></div></div>'
 
     html += '</div></div><script>'
