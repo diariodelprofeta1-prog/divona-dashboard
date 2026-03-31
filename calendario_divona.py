@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timedelta
 import calendar
 
+# Variables de entorno
 TOKEN = os.environ.get("NOTION_TOKEN")
 DATABASE_ID = os.environ.get("DATABASE_ID")
 
@@ -32,62 +33,68 @@ def get_safe_text(prop):
 
 def generar_dashboard():
     res = requests.post("https://api.notion.com/v1/databases/" + str(DATABASE_ID) + "/query", headers=headers)
+    if res.status_code != 200: return
+
     ocupacion = {} 
-    
-    # Lista de colores para diferenciar clientes
-    COLORES = ["#3b82f6", "#8b5cf6", "#ec4899", "#10b981", "#f59e0b", "#06b6d4", "#f43f5e", "#6366f1", "#14b8a6", "#f97316"]
+    # Colores más sobrios y elegantes
+    COLORES = ["#60a5fa", "#a78bfa", "#f472b6", "#34d399", "#fbbf24", "#22d3ee", "#fb7185", "#818cf8"]
 
     for r in res.json().get("results", []):
         p = r["properties"]
         f_data = p.get("Fecha", {}).get("date", {})
         if not f_data: continue
+        
         start = datetime.strptime(f_data.get("start")[:10], "%Y-%m-%d")
         end = datetime.strptime((f_data.get("end") or f_data.get("start"))[:10], "%Y-%m-%d")
         
-        # Asignamos color único por ID de reserva
         res_id = r["id"]
-        idx = sum(ord(c) for c in res_id) % len(COLORES)
-        color_reserva = COLORES[idx]
+        color_idx = sum(ord(c) for c in res_id) % len(COLORES)
+        color_reserva = COLORES[color_idx]
 
-        info = {"nombre": get_safe_text(p.get("Nombre")), "estado": get_safe_text(p.get("Estado")), "color": color_reserva}
+        info = {"nombre": get_safe_text(p.get("Nombre")), "color": color_reserva}
+        
         curr = start
         while curr <= end:
             ocupacion[curr.date()] = info
             curr += timedelta(days=1)
 
+    # HTML con el nuevo diseño de bordes y agrupación
     html = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>DIVONA</title>'
     html += '<script src="https://cdn.tailwindcss.com"></script>'
     html += '<style>'
     html += 'body { background-color: #0f172a; font-family: sans-serif; color: #f1f5f9; } '
-    html += '.month-card { background: #1e293b; border: 1px solid #334155; border-radius: 1.5rem; overflow: hidden; } '
-    html += '.grid-cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; } '
-    html += '.day { aspect-ratio: 1/1; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; border-radius: 6px; border: 1px solid rgba(0,0,0,0.1); } '
-    html += '.occupied { color: white; font-weight: 900; cursor: pointer; } '
-    html += '.free { background: rgba(255,255,255,0.03); color: #475569; } '
-    html += '</style></head><body class="p-8"><div class="max-w-7xl mx-auto">'
-    html += '<h1 class="text-3xl font-black mb-12 border-b border-slate-800 pb-8 uppercase">Sailboat Charter Mallorca</h1>'
-    html += '<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">'
+    html += '.month-card { background: #1e293b; border: 1px solid #334155; border-radius: 1rem; overflow: hidden; } '
+    html += '.grid-cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0px; } ' # Gap 0 para que los bordes se peguen
+    html += '.day { aspect-ratio: 1/1; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; border: 1px solid rgba(255,255,255,0.05); } '
+    html += '.occupied { color: white; font-weight: 700; cursor: pointer; border-width: 2px !important; } '
+    html += '.free { color: #475569; } '
+    html += '</style></head><body>'
+    html += '<div class="p-8 max-w-7xl mx-auto"><h1 class="text-3xl font-black mb-8 border-b border-slate-800 pb-4">DASHBOARD DIVONA</h1>'
+    html += '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">'
 
     for mes in range(3, 12):
         ultimo = calendar.monthrange(2026, mes)[1]
         primer_dia = calendar.monthrange(2026, mes)[0]
         _, t_color = get_day_season(datetime(2026, mes, 15))
         
-        html += '<div class="month-card shadow-2xl">'
-        html += '<div class="p-4 flex justify-between items-center" style="background: ' + t_color + '15; border-bottom: 2px solid ' + t_color + '">'
-        html += '<span class="font-black text-xs" style="color: ' + t_color + '">' + MESES_NOMBRES[mes].upper() + '</span></div>'
+        html += '<div class="month-card shadow-xl">'
+        html += '<div class="p-4 border-b border-slate-700 font-bold text-xs uppercase" style="color:'+t_color+'">'+MESES_NOMBRES[mes]+'</div>'
         html += '<div class="p-4"><div class="grid-cal">'
-        for _ in range(primer_dia): html += '<div></div>'
+        
+        for _ in range(primer_dia): html += '<div class="day border-none"></div>'
+        
         for dia in range(1, ultimo + 1):
-            f_actual = datetime(2026, mes, dia).date()
-            res = ocupacion.get(f_actual)
+            f_act = datetime(2026, mes, dia).date()
+            res = ocupacion.get(f_act)
             if res:
-                html += '<div onclick=\'alert("' + res["nombre"] + '")\' class="day occupied" style="background-color: ' + res["color"] + '">' + str(dia) + '</div>'
+                # Fondo muy suave (15 de opacidad) y borde fuerte del mismo color
+                html += '<div onclick="alert(\''+res['nombre']+'\')" class="day occupied" style="background-color:'+res['color']+'22; border-color:'+res['color']+'">'+str(dia)+'</div>'
             else:
-                html += '<div class="day free">' + str(dia) + '</div>'
-        html += "</div></div></div>"
+                html += '<div class="day free">'+str(dia)+'</div>'
+        
+        html += '</div></div></div>'
 
-    html += "</div></div></body></html>"
+    html += '</div></div></body></html>'
     with open("index.html", "w", encoding="utf-8") as f: f.write(html)
 
 if __name__ == "__main__": generar_dashboard()
