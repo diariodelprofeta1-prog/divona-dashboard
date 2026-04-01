@@ -62,6 +62,14 @@ def get_safe_date(prop):
     try: return datetime.strptime(prop["date"]["start"][:10], "%Y-%m-%d").date()
     except: return None
 
+# Función nueva para extraer la hora (ej: 10:00) de la cadena de Notion
+def get_safe_time(iso_str):
+    if not iso_str or 'T' not in iso_str: return "--:--"
+    try:
+        # Formato esperado: 2026-07-10T10:00:00... -> sacamos el 10:00
+        return iso_str.split('T')[1][:5]
+    except: return "--:--"
+
 def js_safe(text):
     if not text: return ""
     return str(text).replace("'", "´").replace('"', '´').replace('\n', ' - ').replace('\r', '')
@@ -80,51 +88,58 @@ def generar_dashboard():
             f_data = p.get("Fecha", {}).get("date", {})
             if not f_data: continue
             
-            # 1. Fechas base de la reserva
-            start = datetime.strptime(f_data["start"][:10], "%Y-%m-%d").date()
-            end = datetime.strptime((f_data.get("end") or f_data["start"])[:10], "%Y-%m-%d").date()
+            # 1. Fechas y Horas de la reserva
+            start_iso = f_data.get("start")
+            end_iso = f_data.get("end") or start_iso
+            
+            start = datetime.strptime(start_iso[:10], "%Y-%m-%d").date()
+            end = datetime.strptime(end_iso[:10], "%Y-%m-%d").date()
+            
+            hora_in = get_safe_time(start_iso)
+            hora_out = get_safe_time(end_iso)
             
             # Dinero
             monto = get_safe_num(p.get("Total cliente"))
             if get_safe_text(p.get("Estado")) != "CANCELADA": ingresos_mes[start.month] += monto
 
-            # Datos operativos y nombres
+            # Datos operativos
             res_id = r["id"].replace("-", "")
             color_idx = sum(ord(c) for c in res_id) % len(COLORES)
             
-            nombre_real = get_safe_text(p.get("Cliente")) or get_safe_text(p.get("Nombre"))
+            nombre_real = get_safe_text(p.get("Cliente"))
+            if nombre_real == "No asignado": nombre_real = get_safe_text(p.get("Nombre"))
+                
             limpiador = get_safe_text(p.get("Cleaning"))
             encargado_in = get_safe_text(p.get("Check In by:"))
             encargado_out = get_safe_text(p.get("Check out by"))
+            correo = get_safe_text(p.get("Correo electrónico 1"))
             
-            # Detalle para el cartel
+            # Detalle para el cartel con HORAS incluidas
             info_det = (f"CLIENTE: {js_safe(nombre_real)}\\n"
                         f"PERSONAS: {int(get_safe_num(p.get('TRIPULACIÓN')))} | PATRÓN: {get_safe_bool(p.get('PATRON'))}\\n"
                         f"--- OPERATIVA ---\\n"
+                        f"CHECK-IN: {js_safe(encargado_in)} ({hora_in})\\n"
+                        f"CHECK-OUT: {js_safe(encargado_out)} ({hora_out})\\n"
                         f"LIMPIEZA: {js_safe(limpiador)}\\n"
-                        f"CHECK-IN: {js_safe(encargado_in)}\\n"
-                        f"CHECK-OUT: {js_safe(encargado_out)}\\n"
                         f"NOTAS: {js_safe(get_safe_text(p.get('COMENTARIOS')))}")
 
             info = {"id": res_id, "nombre": nombre_real, "color": COLORES[color_idx], "detalle": info_det}
 
-            # Rellenar días de la reserva (Colores)
+            # Rellenar días de la reserva
             curr = start
             while curr <= end:
                 if curr not in agenda: agenda[curr] = {"res": None, "acts": []}
                 agenda[curr]["res"] = info
                 curr += timedelta(days=1)
             
-            # 2. Iconos fijos de reserva
-            # Check-in: siempre primer día
+            # Iconos fijos
             if start not in agenda: agenda[start] = {"res": None, "acts": []}
-            agenda[start]["acts"].append({"tipo": "IN", "id": res_id, "email": get_safe_text(p.get("Correo electrónico 1")), "nombre": nombre_real, "staff": encargado_in})
+            agenda[start]["acts"].append({"tipo": "IN", "id": res_id, "email": correo, "nombre": nombre_real, "staff": encargado_in})
             
-            # Check-out: siempre último día
             if end not in agenda: agenda[end] = {"res": None, "acts": []}
-            agenda[end]["acts"].append({"tipo": "OUT", "id": res_id, "email": get_safe_text(p.get("Correo electrónico 1")), "nombre": nombre_real, "staff": encargado_out})
+            agenda[end]["acts"].append({"tipo": "OUT", "id": res_id, "email": correo, "nombre": nombre_real, "staff": encargado_out})
 
-            # 3. Limpieza: solo si hay fecha específica
+            # Limpieza específica
             f_limp = get_safe_date(p.get("Cleaning Date"))
             if f_limp:
                 if f_limp not in agenda: agenda[f_limp] = {"res": None, "acts": []}
@@ -163,22 +178,32 @@ def generar_dashboard():
                 res, acts = d_day["res"], d_day["acts"]
                 tags = " ".join([a["tipo"] for a in acts])
                 acts_html = ""
+                limp_staff = ""
                 for a in acts:
-                    ico = "🧹" if a["tipo"] == "LIMP" else ("⚓" if a["tipo"] == "IN" else "🏁")
-                    # El nombre del staff se ve al pasar el ratón (title)
-                    label = f'{a["tipo"]}: {a.get("staff", "Pendiente")}'
-                    if a.get("email"):
-                        asu = "Bienvenido a Divona" if a["tipo"] == "IN" else "Gracias por venir"
-                        txt = f"Hola {a['nombre']}..." 
-                        href = f"mailto:{a['email']}?subject={urllib.parse.quote(asu)}&body={urllib.parse.quote(txt)}"
-                        acts_html += f'<a href="{href}" id="{a["tipo"]}-{a["id"]}" title="{label}" class="email-btn cursor-pointer hover:scale-150 transition-transform text-lg" onclick="toggleCorreo(event, this)">{ico}</a>'
-                    else: 
-                        acts_html += f'<span title="{label}">{ico}</span>'
+                    if a["tipo"] == "LIMP":
+                        limp_staff = a.get("staff", "No asignado")
+                        # ESCOBA CON ONCLICK PROPIO
+                        acts_html += f'<span class="cursor-pointer hover:scale-150 transition-transform" title="Limpieza: {limp_staff}" onclick="event.stopPropagation(); alert(\'ENCARGADO LIMPIEZA:\\n{js_safe(limp_staff)}\')">🧹</span>'
+                    else:
+                        ico = "⚓" if a["tipo"] == "IN" else "🏁"
+                        label = f'{a["tipo"]}: {a.get("staff", "No asignado")}'
+                        if a.get("email") and a["email"] != "No asignado":
+                            asu = "Bienvenido a Divona" if a["tipo"] == "IN" else "Gracias por venir"
+                            txt = f"Hola {a['nombre']}..." 
+                            href = f"mailto:{a['email']}?subject={urllib.parse.quote(asu)}&body={urllib.parse.quote(txt)}"
+                            acts_html += f'<a href="{href}" id="{a["tipo"]}-{a["id"]}" title="{label}" class="email-btn cursor-pointer hover:scale-150 transition-transform text-lg" onclick="toggleCorreo(event, this)">{ico}</a>'
+                        else: 
+                            acts_html += f'<span title="{label}">{ico}</span>'
+                
+                if res: alert_text = res["detalle"]
+                elif limp_staff: alert_text = f"Día de Limpieza\\nEncargado: {js_safe(limp_staff)}"
+                else: alert_text = "Día Libre"
+                
                 css = "day day-cell " + ("occupied" if res else "")
                 style = f"background-color:{res['color']}15; border-color:{res['color']};" if res else ""
-                html += f'<div class="{css}" data-tags="{tags}" style="{style}" onclick="alert(\'{res["detalle"] if res else ("Limpieza: " + acts[0]["staff"] if "LIMP" in tags else "Libre")}\')"><span class="font-bold">{dia}</span><div class="flex gap-1">{acts_html}</div></div>'
+                html += f'<div class="{css}" data-tags="{tags}" style="{style}" onclick="alert(\'{alert_text}\')"><span class="font-bold">{dia}</span><div class="flex gap-1">{acts_html}</div></div>'
             html += '</div></div></div></div>'
-        html += f'</div><div class="text-center text-xs text-slate-500 mt-8 pb-4">Actualizado: {datetime.now().strftime("%d/%m/%Y %H:%M")}</div></div>'
+        html += f'</div><div class="text-center text-xs text-slate-500 mt-8 pb-4">Actualizado: {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}</div></div>'
         js = """<script>
         function filterView(type, btn) {
             document.querySelectorAll(".filter-btn").forEach(b => { b.classList.replace("bg-blue-600", "bg-slate-700"); });
@@ -202,6 +227,6 @@ def generar_dashboard():
         with open("index.html", "w", encoding="utf-8") as f: f.write(html + js)
     except Exception as e:
         with open("index.html", "w", encoding="utf-8") as f:
-            f.write(f"<html><body><h1>Error:</h1><pre>{traceback.format_exc()}</pre></body></html>")
+            f.write(f"<html><body><h1 style='color:red;'>Error:</h1><pre>{traceback.format_exc()}</pre></body></html>")
 
 if __name__ == "__main__": generar_dashboard()
