@@ -1,6 +1,8 @@
 name: update_dashboard
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '0 * * * *' # Esto se ejecuta automáticamente al principio de cada hora
 
 jobs:
   build:
@@ -17,7 +19,7 @@ jobs:
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           DATABASE_ID: ${{ secrets.DATABASE_ID }}
-        run: python calendario_divona.py  # <--- YA TIENE EL NOMBRE CORRECTO
+        run: python calendario_divona.py
       - name: Commit and push changes
         run: |
           git config --global user.name "github-actions[bot]"
