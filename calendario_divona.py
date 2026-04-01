@@ -25,16 +25,16 @@ def get_day_season(date_obj):
     return "BAJA", "#64748b"
 
 def get_safe_text(prop):
-    if not prop: return ""
+    if not prop: return "No asignado"
     try:
         t = prop.get("type")
-        if t in ["title", "rich_text"]: return prop[t][0]["plain_text"] if prop[t] else ""
-        if t in ["select", "status"]: return prop[t]["name"] if prop[t] else ""
+        if t in ["title", "rich_text"]: return prop[t][0]["plain_text"] if prop[t] else "No asignado"
+        if t in ["select", "status"]: return prop[t]["name"] if prop[t] else "No asignado"
         if t == "phone_number": return prop.get("phone_number") or ""
-        if t == "people": return prop["people"][0]["name"] if prop["people"] else ""
+        if t == "people": return prop["people"][0]["name"] if prop["people"] else "No asignado"
         if t == "email": return prop.get("email") or ""
-        return ""
-    except: return ""
+        return "No asignado"
+    except: return "No asignado"
 
 def get_safe_num(prop):
     if not prop: return 0
@@ -80,47 +80,57 @@ def generar_dashboard():
             f_data = p.get("Fecha", {}).get("date", {})
             if not f_data: continue
             
+            # 1. Fechas base de la reserva
             start = datetime.strptime(f_data["start"][:10], "%Y-%m-%d").date()
             end = datetime.strptime((f_data.get("end") or f_data["start"])[:10], "%Y-%m-%d").date()
             
+            # Dinero
             monto = get_safe_num(p.get("Total cliente"))
             if get_safe_text(p.get("Estado")) != "CANCELADA": ingresos_mes[start.month] += monto
 
+            # Datos operativos y nombres
             res_id = r["id"].replace("-", "")
             color_idx = sum(ord(c) for c in res_id) % len(COLORES)
             
             nombre_real = get_safe_text(p.get("Cliente")) or get_safe_text(p.get("Nombre"))
+            limpiador = get_safe_text(p.get("Cleaning"))
+            encargado_in = get_safe_text(p.get("Check In by:"))
+            encargado_out = get_safe_text(p.get("Check out by"))
+            
+            # Detalle para el cartel
             info_det = (f"CLIENTE: {js_safe(nombre_real)}\\n"
-                        f"BOOKING: {get_safe_text(p.get('BOOKING NUMBER'))} | IDIOMA: {get_safe_text(p.get('Idioma'))}\\n"
-                        f"TEL: {get_safe_text(p.get('Teléfono'))} | PERSONAS: {int(get_safe_num(p.get('TRIPULACIÓN')))}\\n"
-                        f"PATRÓN: {get_safe_bool(p.get('PATRON'))} | EXTRAS: {js_safe(get_safe_multi(p.get('EXTRAS')))}\\n"
-                        f"DEPÓSITO: {int(get_safe_num(p.get('Deposit')))}€ | TOTAL: {int(monto)}€\\n"
-                        f"CHECK-IN: {get_safe_text(p.get('Check In by:'))} | CHECK-OUT: {get_safe_text(p.get('Check out by'))}\\n"
+                        f"PERSONAS: {int(get_safe_num(p.get('TRIPULACIÓN')))} | PATRÓN: {get_safe_bool(p.get('PATRON'))}\\n"
+                        f"--- OPERATIVA ---\\n"
+                        f"LIMPIEZA: {js_safe(limpiador)}\\n"
+                        f"CHECK-IN: {js_safe(encargado_in)}\\n"
+                        f"CHECK-OUT: {js_safe(encargado_out)}\\n"
                         f"NOTAS: {js_safe(get_safe_text(p.get('COMENTARIOS')))}")
 
             info = {"id": res_id, "nombre": nombre_real, "color": COLORES[color_idx], "detalle": info_det}
 
-            # Rellenar calendario días ocupados
+            # Rellenar días de la reserva (Colores)
             curr = start
             while curr <= end:
                 if curr not in agenda: agenda[curr] = {"res": None, "acts": []}
                 agenda[curr]["res"] = info
-                if curr == start: 
-                    agenda[curr]["acts"].append({"tipo": "IN", "id": res_id, "email": get_safe_text(p.get("Correo electrónico 1")), "nombre": nombre_real})
                 curr += timedelta(days=1)
             
-            # Check-out dinámico
-            f_out = get_safe_date(p.get("Check out")) or end
-            if f_out not in agenda: agenda[f_out] = {"res": None, "acts": []}
-            agenda[f_out]["acts"].append({"tipo": "OUT", "id": res_id, "email": get_safe_text(p.get("Correo electrónico 1")), "nombre": nombre_real})
+            # 2. Iconos fijos de reserva
+            # Check-in: siempre primer día
+            if start not in agenda: agenda[start] = {"res": None, "acts": []}
+            agenda[start]["acts"].append({"tipo": "IN", "id": res_id, "email": get_safe_text(p.get("Correo electrónico 1")), "nombre": nombre_real, "staff": encargado_in})
+            
+            # Check-out: siempre último día
+            if end not in agenda: agenda[end] = {"res": None, "acts": []}
+            agenda[end]["acts"].append({"tipo": "OUT", "id": res_id, "email": get_safe_text(p.get("Correo electrónico 1")), "nombre": nombre_real, "staff": encargado_out})
 
-            # LIMPIEZA DINÁMICA (SOLO si hay fecha en la columna)
+            # 3. Limpieza: solo si hay fecha específica
             f_limp = get_safe_date(p.get("Cleaning Date"))
             if f_limp:
                 if f_limp not in agenda: agenda[f_limp] = {"res": None, "acts": []}
-                agenda[f_limp]["acts"].append({"tipo": "LIMP", "id": res_id})
+                agenda[f_limp]["acts"].append({"tipo": "LIMP", "id": res_id, "staff": limpiador})
 
-        # --- HTML ---
+        # --- GENERACIÓN HTML ---
         html = """<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>DIVONA 2026</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <style>
@@ -154,18 +164,19 @@ def generar_dashboard():
                 tags = " ".join([a["tipo"] for a in acts])
                 acts_html = ""
                 for a in acts:
-                    if a["tipo"] == "LIMP": acts_html += '<span>🧹</span>'
-                    else:
-                        ico = "⚓" if a["tipo"] == "IN" else "🏁"
-                        if a.get("email"):
-                            asu = "Bienvenido a Divona" if a["tipo"] == "IN" else "Gracias por venir"
-                            txt = f"Hola {a['nombre']}..." 
-                            href = f"mailto:{a['email']}?subject={urllib.parse.quote(asu)}&body={urllib.parse.quote(txt)}"
-                            acts_html += f'<a href="{href}" id="{a["tipo"]}-{a["id"]}" class="email-btn cursor-pointer hover:scale-150 transition-transform text-lg" onclick="toggleCorreo(event, this)">{ico}</a>'
-                        else: acts_html += f'<span>{ico}</span>'
+                    ico = "🧹" if a["tipo"] == "LIMP" else ("⚓" if a["tipo"] == "IN" else "🏁")
+                    # El nombre del staff se ve al pasar el ratón (title)
+                    label = f'{a["tipo"]}: {a.get("staff", "Pendiente")}'
+                    if a.get("email"):
+                        asu = "Bienvenido a Divona" if a["tipo"] == "IN" else "Gracias por venir"
+                        txt = f"Hola {a['nombre']}..." 
+                        href = f"mailto:{a['email']}?subject={urllib.parse.quote(asu)}&body={urllib.parse.quote(txt)}"
+                        acts_html += f'<a href="{href}" id="{a["tipo"]}-{a["id"]}" title="{label}" class="email-btn cursor-pointer hover:scale-150 transition-transform text-lg" onclick="toggleCorreo(event, this)">{ico}</a>'
+                    else: 
+                        acts_html += f'<span title="{label}">{ico}</span>'
                 css = "day day-cell " + ("occupied" if res else "")
                 style = f"background-color:{res['color']}15; border-color:{res['color']};" if res else ""
-                html += f'<div class="{css}" data-tags="{tags}" style="{style}" onclick="alert(\'{res["detalle"] if res else ("Limpieza" if "LIMP" in tags else "Libre")}\')"><span class="font-bold">{dia}</span><div class="flex gap-1">{acts_html}</div></div>'
+                html += f'<div class="{css}" data-tags="{tags}" style="{style}" onclick="alert(\'{res["detalle"] if res else ("Limpieza: " + acts[0]["staff"] if "LIMP" in tags else "Libre")}\')"><span class="font-bold">{dia}</span><div class="flex gap-1">{acts_html}</div></div>'
             html += '</div></div></div></div>'
         html += f'</div><div class="text-center text-xs text-slate-500 mt-8 pb-4">Actualizado: {datetime.now().strftime("%d/%m/%Y %H:%M")}</div></div>'
         js = """<script>
