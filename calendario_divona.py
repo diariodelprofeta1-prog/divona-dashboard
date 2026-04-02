@@ -77,8 +77,6 @@ def generar_dashboard():
         data = res.json()
 
         agenda = {}
-        ingresos_mes = {m: 0 for m in range(1, 13)}
-        # Paleta de colores mejorada para fondos oscuros (Neon/Pastel brillantes)
         COLORES = ["#3b82f6", "#8b5cf6", "#ec4899", "#10b981", "#f59e0b", "#0ea5e9", "#f43f5e", "#6366f1", "#14b8a6", "#f97316", "#d946ef", "#84cc16"]
 
         for r in data.get("results", []):
@@ -95,14 +93,18 @@ def generar_dashboard():
             hora_out = get_safe_time(end_iso)
             
             monto = get_safe_num(p.get("Total cliente"))
-            if get_safe_text(p.get("Estado")) != "CANCELADA": ingresos_mes[start.month] += monto
-
+            
             res_id = r["id"].replace("-", "")
             color_idx = sum(ord(c) for c in res_id) % len(COLORES)
             color_res = COLORES[color_idx]
             
             nombre_real = get_safe_text(p.get("Cliente"))
             if nombre_real == "No asignado": nombre_real = get_safe_text(p.get("Nombre"))
+            
+            # Cogemos el Booking Number para mostrar en el calendario
+            booking_number = get_safe_text(p.get("BOOKING NUMBER"))
+            if booking_number == "No asignado" or not booking_number.strip(): 
+                booking_number = "RES" # Texto por defecto si no hay Booking Number
                 
             limpiador = get_safe_text(p.get("Cleaning"))
             encargado_in = get_safe_text(p.get("Check In by:"))
@@ -116,7 +118,7 @@ def generar_dashboard():
             notas = get_safe_text(p.get("COMENTARIOS"))
 
             info = {
-                "id": res_id, "nombre": nombre_real, "color": color_res,
+                "id": res_id, "nombre": nombre_real, "booking": booking_number, "color": color_res,
                 "tel": telefono, "correo": correo, "pax": pax, "patron": patron,
                 "extras": extras, "deposito": deposito, "monto": monto, "notas": notas
             }
@@ -145,7 +147,8 @@ def generar_dashboard():
         body { background-color: #0b1120; font-family: sans-serif; color: #f1f5f9; } 
         .month-card { background: #1e293b; border: 1px solid #334155; border-radius: 1.25rem; overflow: hidden; height: 100%; display: flex; flex-direction: column; box-shadow: 0 10px 30px -10px rgba(0,0,0,0.6); } 
         .grid-cal { display: grid; grid-template-columns: repeat(7, 1fr); grid-template-rows: repeat(6, 1fr); gap: 4px; flex-grow: 1; min-height: 260px; padding: 6px; } 
-        .day { min-height: 58px; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 4px 2px; font-size: 0.7rem; transition: all 0.25s ease; position: relative; } 
+        /* Añadido max-width y overflow-hidden para evitar desbordes */
+        .day { min-height: 58px; max-width: 100%; overflow: hidden; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 4px 2px; font-size: 0.7rem; transition: all 0.25s ease; position: relative; } 
         .empty-day { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.02); }
         .occupied { cursor: pointer; border-top: 1px solid rgba(255,255,255,0.05); border-right: 1px solid rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.05); } 
         .occupied:hover { transform: translateY(-3px) scale(1.02); box-shadow: 0 8px 16px rgba(0,0,0,0.4); filter: brightness(1.2); z-index: 10; }
@@ -153,8 +156,9 @@ def generar_dashboard():
         .highlight { border: 2px solid white !important; background: rgba(255,255,255,0.15) !important; transform: scale(1.05) translateY(-3px); z-index: 20; box-shadow: 0 0 20px rgba(255,255,255,0.1); } 
         </style></head><body>
         """
-        total_anual = sum(ingresos_mes.values())
-        html += f'<div class="p-8 max-w-7xl mx-auto"><div class="flex flex-col md:flex-row justify-between items-end mb-12 gap-6"><div><h1 class="text-4xl font-black tracking-tighter uppercase drop-shadow-lg">Divona Center</h1><p class="text-blue-400 font-bold text-xl mt-2">TOTAL 2026: {total_anual:,.0f} €</p></div>'
+        
+        # Eliminados los totales económicos del encabezado
+        html += '<div class="p-8 max-w-7xl mx-auto"><div class="flex flex-col md:flex-row justify-between items-end mb-12 gap-6"><div><h1 class="text-4xl font-black tracking-tighter uppercase drop-shadow-lg">Divona Center</h1><p class="text-blue-500/50 font-bold text-sm mt-2 uppercase tracking-widest">Panel de Operativa</p></div>'
         html += '<div class="flex flex-wrap gap-2 shadow-lg rounded-lg"><button onclick="filterView(\'all\', this)" class="filter-btn bg-blue-600 px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase transition-colors">General</button>'
         html += '<button onclick="filterView(\'LIMP\', this)" class="filter-btn bg-slate-700 hover:bg-slate-600 px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase transition-colors">Limpiezas</button>'
         html += '<button onclick="filterView(\'IN\', this)" class="filter-btn bg-slate-700 hover:bg-slate-600 px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase transition-colors">Check-in</button>'
@@ -166,9 +170,9 @@ def generar_dashboard():
             primer_dia = calendar.monthrange(2026, mes)[0]
             _, t_color = get_day_season(datetime(2026, mes, 15))
             
-            html += f'<div><div class="month-card"><div class="p-4 border-b border-slate-700/50 flex justify-between items-center bg-slate-800/80"><span class="font-black text-[11px] uppercase tracking-wider" style="color:{t_color}; text-shadow: 0 0 10px {t_color}40;">{MESES_NOMBRES[mes]}</span><span class="text-white font-bold text-[10px] bg-slate-900/50 border border-slate-700 px-2 py-1.5 rounded-md shadow-inner">{ingresos_mes[mes]:,.0f} €</span></div><div class="p-1.5 flex-grow flex flex-col bg-slate-900/20"><div class="grid-cal">'
+            # Eliminado el total mensual de la cabecera del mes (ahora el nombre del mes sale centrado)
+            html += f'<div><div class="month-card"><div class="p-4 border-b border-slate-700/50 flex justify-center items-center bg-slate-800/80"><span class="font-black text-[12px] uppercase tracking-widest" style="color:{t_color}; text-shadow: 0 0 10px {t_color}40;">{MESES_NOMBRES[mes]}</span></div><div class="p-1.5 flex-grow flex flex-col bg-slate-900/20"><div class="grid-cal">'
             
-            # Espacios vacíos al principio del mes
             for _ in range(primer_dia): html += '<div class="day border-none bg-transparent"></div>'
             
             for dia in range(1, ultimo + 1):
@@ -202,33 +206,32 @@ def generar_dashboard():
                         else:
                             acts_html += f'<span class="cursor-pointer hover:scale-150 transition-transform text-[16px] drop-shadow-md z-20" data-type="operativa" data-op-tipo="{op_tipo}" data-hora="{hora}" data-staff="{staff}" onclick="event.stopPropagation(); openModal(this)">{ico}</span>'
                 
-                # Diseño de Celda
+                # Diseño de Celda con número de Booking y truncado para que no se desborde
                 if res:
                     css = "day day-cell occupied"
-                    # Background con gradiente + borde grueso a la izquierda
                     style = f"background: linear-gradient(135deg, {res['color']}25 0%, {res['color']}08 100%); border-left: 4px solid {res['color']};"
                     data_attr = f'data-type="reserva" data-cliente="{html_safe(res["nombre"])}" data-tel="{html_safe(res["tel"])}" data-email="{html_safe(res["correo"])}" data-pax="{res["pax"]}" data-patron="{res["patron"]}" data-extras="{html_safe(res["extras"])}" data-deposito="{res["deposito"]}" data-total="{res["monto"]}" data-notas="{html_safe(res["notas"])}"'
                     
-                    # Nombre corto para el calendario (máximo 8 letras para que quede estético)
-                    nombre_corto = res["nombre"].split()[0][:8]
-                    nombre_html = f'<span class="text-[8px] font-black uppercase tracking-wider truncate w-full text-center mt-0.5 z-10 drop-shadow-md" style="color:{res["color"]}">{nombre_corto}</span>'
+                    # Mostrar el Booking (si es largo, Tailwind lo recorta automáticamente con 'truncate')
+                    booking_str = html_safe(res["booking"])
+                    booking_html = f'<span class="block text-[8px] font-black uppercase tracking-wider truncate w-full px-1 text-center mt-0.5 z-10 drop-shadow-md" style="color:{res["color"]}" title="Cliente: {html_safe(res["nombre"])}">{booking_str}</span>'
                 else:
                     css = "day day-cell empty-day"
                     style = ""
-                    nombre_html = ""
+                    booking_html = ""
                     data_type = "limpieza_sola" if "LIMP" in tags else "libre"
                     data_attr = f'data-type="{data_type}"'
                 
                 html += f'<div class="{css}" data-tags="{tags}" style="{style}" {data_attr} onclick="openModal(this)">'
                 html += f'<span class="font-bold text-slate-300 text-[11px] z-10">{dia}</span>'
-                html += nombre_html
+                html += booking_html
                 html += f'<div class="flex gap-1.5 mt-auto z-10 mb-0.5">{acts_html}</div></div>'
                 
             html += '</div></div></div></div>'
             
         html += f'</div><div class="text-center text-xs text-slate-500 mt-10 pb-6 opacity-70">Actualizado: {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}</div></div>'
         
-        # --- HTML DEL MODAL Y SCRIPTS (LÓGICA INTACTA) ---
+        # --- HTML DEL MODAL ---
         js_modal = """
         <div id="modal" class="fixed inset-0 bg-slate-950/80 hidden z-50 flex items-center justify-center p-4 backdrop-blur-md opacity-0 transition-opacity duration-300" onclick="closeModal()">
             <div id="modal-panel" class="bg-slate-800 border border-slate-600/50 rounded-2xl shadow-[0_0_50px_-12px_rgba(0,0,0,0.8)] w-full max-w-md transform scale-95 transition-transform duration-300" onclick="event.stopPropagation()">
